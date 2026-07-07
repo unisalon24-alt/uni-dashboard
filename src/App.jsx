@@ -534,6 +534,7 @@ export default function App() {
   const [importMsg, setImportMsg] = useState("");
   const [importStore, setImportStore] = useState("");
   const [oaStore, setOaStore] = useState("");
+  const [oaMonth, setOaMonth] = useState("");
   const [oaSales, setOaSales] = useState("");
   const [oaProductSales, setOaProductSales] = useState("");
   const [loadState, setLoadState] = useState("loading"); // loading | loaded | error
@@ -704,11 +705,14 @@ export default function App() {
     if (!oaStore && storeNames.length > 0) setOaStore(storeNames[0]);
   }, [storeNames, oaStore]);
 
+  useEffect(() => {
+    if (!oaMonth) setOaMonth(effectiveMonth || SEED_MONTH);
+  }, [effectiveMonth, oaMonth]);
+
   const ownerRow = useMemo(() => {
-    if (!oaStore) return null;
-    const month = effectiveMonth || SEED_MONTH;
-    return staffRows.find((r) => r.hidden && r.store === oaStore && r.month === month) || null;
-  }, [staffRows, oaStore, effectiveMonth]);
+    if (!oaStore || !oaMonth) return null;
+    return staffRows.find((r) => r.hidden && r.store === oaStore && r.month === oaMonth) || null;
+  }, [staffRows, oaStore, oaMonth]);
 
   useEffect(() => {
     setOaSales(String(ownerRow ? ownerRow.sales || 0 : 0));
@@ -716,8 +720,8 @@ export default function App() {
   }, [ownerRow]);
 
   const saveOwnerAdjustment = () => {
-    if (!oaStore) return;
-    const month = effectiveMonth || SEED_MONTH;
+    if (!oaStore || !oaMonth) return;
+    const month = oaMonth;
     setStaffRows((prev) => {
       const idx = prev.findIndex((r) => r.hidden && r.store === oaStore && r.month === month);
       const newRow = {
@@ -1297,7 +1301,7 @@ export default function App() {
             <div style={{ background: "#fff", border: `1px dashed ${LINE}`, borderRadius: 4, padding: "16px 18px", marginTop: 18 }}>
               <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>オーナー調整（非表示・{ADMIN_EMAIL}にのみ表示）</div>
               <div style={{ fontSize: 11.5, color: INK_SOFT, marginBottom: 12, lineHeight: 1.6 }}>
-                ここで入力した金額は、スタッフ一覧やCSVエクスポートなど他の人が見る画面には一切表示されず、店舗の売上合計（KPI・グラフ）にのみ加算されます。対象月：{effectiveMonth || SEED_MONTH}
+                ここで入力した金額は、スタッフ一覧やCSVエクスポートなど他の人が見る画面には一切表示されず、店舗の売上合計（KPI・グラフ）にのみ加算されます。店舗と月を選んで、その月の分を入力・保存してください（過去の月も自由に選べます）。
               </div>
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <select
@@ -1311,6 +1315,21 @@ export default function App() {
                     </option>
                   ))}
                 </select>
+                <label style={{ fontSize: 12, color: INK_SOFT, display: "flex", alignItems: "center", gap: 6 }}>
+                  対象月
+                  <input
+                    list="oa-month-list"
+                    value={oaMonth}
+                    onChange={(e) => setOaMonth(e.target.value)}
+                    placeholder="例：2026年3月"
+                    style={{ border: `1px solid ${LINE}`, borderRadius: 4, padding: "6px 8px", fontSize: 12.5, width: 110, fontFamily: "'Noto Sans JP', sans-serif" }}
+                  />
+                  <datalist id="oa-month-list">
+                    {availableMonths.map((m) => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
+                </label>
                 <label style={{ fontSize: 12, color: INK_SOFT, display: "flex", alignItems: "center", gap: 6 }}>
                   技術売上
                   <input
