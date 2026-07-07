@@ -278,9 +278,9 @@ const PAPER_2 = "#F1E8D8";
 const LINE = "#E3D6BC";
 const PLUM = "#6E4A56";
 
-// 実データでは店舗トップ層でもリピート率85〜91%程度に収まっていたため、
-// 「ゴールド」評価の基準は85%に設定（単一基準・シルバー相当は廃止）。
-const RATING_THRESHOLD = 0.85;
+// 王冠は「次回予約率（新規）80%以上」かつ「次回予約率（顧客）90%以上」を両方達成した場合のみ表示
+const NEW_BOOKING_THRESHOLD = 0.8;
+const REPEAT_BOOKING_THRESHOLD = 0.9;
 
 // 全員共有の保存状態を小さく表示する
 // 管理者ログイン用の小さなフォーム
@@ -409,14 +409,10 @@ function SaveStatus({ loadState, saveState }) {
   return null;
 }
 
-function RatingBadge({ rate }) {
-  if (rate >= RATING_THRESHOLD) {
-    return (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-        <Crown size={17} style={{ color: GOLD, filter: `drop-shadow(0 0 4px ${GOLD_LIGHT})` }} fill={GOLD} />
-        <span style={{ fontSize: 11.5, color: GOLD, fontWeight: 700, letterSpacing: 0.5 }}>ゴールド</span>
-      </span>
-    );
+function RatingBadge({ newBookingRate, repeatBookingRate }) {
+  const achieved = newBookingRate >= NEW_BOOKING_THRESHOLD && repeatBookingRate >= REPEAT_BOOKING_THRESHOLD;
+  if (achieved) {
+    return <Crown size={18} style={{ color: GOLD, filter: `drop-shadow(0 0 4px ${GOLD_LIGHT})` }} fill={GOLD} />;
   }
   return <span style={{ fontSize: 12, color: INK_SOFT }}>—</span>;
 }
@@ -1096,7 +1092,7 @@ export default function App() {
                             style={{
                               width: `${Math.min(p.repeatBookingRate * 100, 100)}%`,
                               height: "100%",
-                              background: p.repeatBookingRate >= RATING_THRESHOLD ? GOLD : TEAL,
+                              background: p.repeatBookingRate >= REPEAT_BOOKING_THRESHOLD ? GOLD : TEAL,
                             }}
                           />
                         </div>
@@ -1106,14 +1102,14 @@ export default function App() {
                     <td style={{ padding: "10px 10px", textAlign: "right", color: INK_SOFT, fontVariantNumeric: "tabular-nums" }}>{yen(p.avgSpend)}</td>
                     <td style={{ padding: "10px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{yen(p.totalSales)}</td>
                     <td style={{ padding: "10px 18px" }}>
-                      <RatingBadge rate={p.repeatBookingRate} />
+                      <RatingBadge newBookingRate={p.newBookingRate} repeatBookingRate={p.repeatBookingRate} />
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <div style={{ padding: "10px 18px", fontSize: 11.5, color: INK_SOFT }}>
-              評価「ゴールド」：次回予約率（顧客） 85%以上
+              王冠：次回予約率（新規）80%以上　かつ　次回予約率（顧客）90%以上　を両方達成
             </div>
           </div>
         </>
