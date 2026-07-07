@@ -97,9 +97,8 @@ const REPORTED_ROWS = [
   { name: "難波順一朗", month: "2026年4月", newC: 7, newBookings: 6, repeatC: 28, repeatBookings: 26, sales: 595_700 },
   { name: "難波順一朗", month: "2026年5月", newC: 13, newBookings: 12, repeatC: 32, repeatBookings: 32, sales: 738_100 },
   { name: "難波順一朗", month: "2026年6月", newC: 10, newBookings: 10, repeatC: 34, repeatBookings: 33, sales: 667_100 },
-  // 児島店：オーナー分の売上のみ計上。hidden:true のためスタッフ一覧には一切表示されず、
-  // 店舗の売上合計にのみ加算される（管理者だけが専用パネルから編集できる）。
-  { name: "__owner__", store: "児島店", month: "2026年6月", newC: 0, newBookings: 0, repeatC: 0, repeatBookings: 0, sales: 0, productSales: 0, hidden: true },
+  // 難波幸平（児島店）：ご本人が売上等を直接入力予定
+  { name: "難波幸平", store: "児島店", month: "2026年6月", newC: 0, newBookings: 0, repeatC: 0, repeatBookings: 0, sales: 0, productSales: 0 },
   // 中村晴美（福山店）
   { name: "中村晴美", month: "2026年2月", newC: 5, newBookings: 2, repeatC: 72, repeatBookings: 34, sales: 1_219_550 },
   { name: "中村晴美", month: "2026年3月", newC: 11, newBookings: 8, repeatC: 79, repeatBookings: 34, sales: 1_299_150 },
@@ -533,10 +532,7 @@ export default function App() {
   const [staffRows, setStaffRows] = useState(INITIAL_STAFF);
   const [importMsg, setImportMsg] = useState("");
   const [importStore, setImportStore] = useState("");
-  const [oaStore, setOaStore] = useState("");
-  const [oaMonth, setOaMonth] = useState("");
-  const [oaSales, setOaSales] = useState("");
-  const [oaProductSales, setOaProductSales] = useState("");
+
   const [loadState, setLoadState] = useState("loading"); // loading | loaded | error
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
   const [user, setUser] = useState(null);
@@ -661,7 +657,6 @@ export default function App() {
 
   const rankedStaff = useMemo(() => {
     return [...filteredStaff]
-      .filter((r) => !r.hidden)
       .map((r) => {
         const totalSales = Number(r.sales || 0) + Number(r.productSales || 0);
         return {
@@ -698,52 +693,6 @@ export default function App() {
         productSales: 0,
       },
     ]);
-  };
-
-  // ---- 非表示のオーナー調整（管理者のみ編集可・スタッフ一覧には一切表示しない） ----
-  useEffect(() => {
-    if (!oaStore && storeNames.length > 0) setOaStore(storeNames[0]);
-  }, [storeNames, oaStore]);
-
-  useEffect(() => {
-    if (!oaMonth) setOaMonth(effectiveMonth || SEED_MONTH);
-  }, [effectiveMonth, oaMonth]);
-
-  const ownerRow = useMemo(() => {
-    if (!oaStore || !oaMonth) return null;
-    return staffRows.find((r) => r.hidden && r.store === oaStore && r.month === oaMonth) || null;
-  }, [staffRows, oaStore, oaMonth]);
-
-  useEffect(() => {
-    setOaSales(String(ownerRow ? ownerRow.sales || 0 : 0));
-    setOaProductSales(String(ownerRow ? ownerRow.productSales || 0 : 0));
-  }, [ownerRow]);
-
-  const saveOwnerAdjustment = () => {
-    if (!oaStore || !oaMonth) return;
-    const month = oaMonth;
-    setStaffRows((prev) => {
-      const idx = prev.findIndex((r) => r.hidden && r.store === oaStore && r.month === month);
-      const newRow = {
-        id: idx !== -1 ? prev[idx].id : uid("owner"),
-        name: "__owner__",
-        store: oaStore,
-        month,
-        newC: 0,
-        newBookings: 0,
-        repeatC: 0,
-        repeatBookings: 0,
-        sales: Number(oaSales) || 0,
-        productSales: Number(oaProductSales) || 0,
-        hidden: true,
-      };
-      if (idx !== -1) {
-        const copy = [...prev];
-        copy[idx] = newRow;
-        return copy;
-      }
-      return [...prev, newRow];
-    });
   };
 
   const downloadTemplate = () => {
@@ -1247,7 +1196,7 @@ export default function App() {
                 </tr>
               </thead>
               <tbody>
-                {staffRows.filter((r) => !r.hidden).map((r) => {
+                {staffRows.map((r) => {
                   const issues = rowAnomalies(r);
                   return (
                     <tr
@@ -1296,68 +1245,6 @@ export default function App() {
               </tbody>
             </table>
           </div>
-
-          {isAdmin && (
-            <div style={{ background: "#fff", border: `1px dashed ${LINE}`, borderRadius: 4, padding: "16px 18px", marginTop: 18 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>オーナー調整（非表示・{ADMIN_EMAIL}にのみ表示）</div>
-              <div style={{ fontSize: 11.5, color: INK_SOFT, marginBottom: 12, lineHeight: 1.6 }}>
-                ここで入力した金額は、スタッフ一覧やCSVエクスポートなど他の人が見る画面には一切表示されず、店舗の売上合計（KPI・グラフ）にのみ加算されます。店舗と月を選んで、その月の分を入力・保存してください（過去の月も自由に選べます）。
-              </div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <select
-                  value={oaStore}
-                  onChange={(e) => setOaStore(e.target.value)}
-                  style={{ border: `1px solid ${LINE}`, borderRadius: 4, padding: "7px 10px", fontSize: 12.5, fontFamily: "'Noto Sans JP', sans-serif" }}
-                >
-                  {storeNames.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-                <label style={{ fontSize: 12, color: INK_SOFT, display: "flex", alignItems: "center", gap: 6 }}>
-                  対象月
-                  <input
-                    list="oa-month-list"
-                    value={oaMonth}
-                    onChange={(e) => setOaMonth(e.target.value)}
-                    placeholder="例：2026年3月"
-                    style={{ border: `1px solid ${LINE}`, borderRadius: 4, padding: "6px 8px", fontSize: 12.5, width: 110, fontFamily: "'Noto Sans JP', sans-serif" }}
-                  />
-                  <datalist id="oa-month-list">
-                    {availableMonths.map((m) => (
-                      <option key={m} value={m} />
-                    ))}
-                  </datalist>
-                </label>
-                <label style={{ fontSize: 12, color: INK_SOFT, display: "flex", alignItems: "center", gap: 6 }}>
-                  技術売上
-                  <input
-                    type="number"
-                    value={oaSales}
-                    onChange={(e) => setOaSales(e.target.value)}
-                    style={{ border: `1px solid ${LINE}`, borderRadius: 4, padding: "6px 8px", fontSize: 12.5, width: 110 }}
-                  />
-                </label>
-                <label style={{ fontSize: 12, color: INK_SOFT, display: "flex", alignItems: "center", gap: 6 }}>
-                  店販売上
-                  <input
-                    type="number"
-                    value={oaProductSales}
-                    onChange={(e) => setOaProductSales(e.target.value)}
-                    style={{ border: `1px solid ${LINE}`, borderRadius: 4, padding: "6px 8px", fontSize: 12.5, width: 110 }}
-                  />
-                </label>
-                <button
-                  className="sd-btn"
-                  onClick={saveOwnerAdjustment}
-                  style={{ background: INK, color: PAPER, border: "none", borderRadius: 4, padding: "7px 16px", fontSize: 12.5, fontWeight: 600 }}
-                >
-                  保存
-                </button>
-              </div>
-            </div>
-          )}
         </>
       )}
     </div>
