@@ -67,7 +67,6 @@ const STAFF_STORE_MAP = {
   小野木慶子: "会津若松店",
   中村晴美: "福山店",
   難波順一朗: "岡山店", // 岡山店オーナー
-  難波幸平: "児島店",
 };
 
 // 共有いただいた月次報告シートの実データ（2026年1月〜6月分）をそのまま反映。
@@ -98,8 +97,9 @@ const REPORTED_ROWS = [
   { name: "難波順一朗", month: "2026年4月", newC: 7, newBookings: 6, repeatC: 28, repeatBookings: 26, sales: 595_700 },
   { name: "難波順一朗", month: "2026年5月", newC: 13, newBookings: 12, repeatC: 32, repeatBookings: 32, sales: 738_100 },
   { name: "難波順一朗", month: "2026年6月", newC: 10, newBookings: 10, repeatC: 34, repeatBookings: 33, sales: 667_100 },
-  // 難波幸平（児島店）：ご本人が売上等を直接入力予定のためゼロ値のプレースホルダー
-  { name: "難波幸平", month: "2026年6月", newC: 0, newBookings: 0, repeatC: 0, repeatBookings: 0, sales: 0 },
+  // 児島店：オーナー分の売上のみ計上。hidden:true のためスタッフ一覧には一切表示されず、
+  // 店舗の売上合計にのみ加算される（管理者だけが専用パネルから編集できる）。
+  { name: "__owner__", store: "児島店", month: "2026年6月", newC: 0, newBookings: 0, repeatC: 0, repeatBookings: 0, sales: 0, productSales: 0, hidden: true },
   // 中村晴美（福山店）
   { name: "中村晴美", month: "2026年2月", newC: 5, newBookings: 2, repeatC: 72, repeatBookings: 34, sales: 1_219_550 },
   { name: "中村晴美", month: "2026年3月", newC: 11, newBookings: 8, repeatC: 79, repeatBookings: 34, sales: 1_299_150 },
@@ -134,19 +134,33 @@ function aggregateBy(rows, key, valueKey = "sales") {
   return Array.from(map.entries()).map(([name, value]) => ({ name, [valueKey]: value }));
 }
 
+// 店舗ごとの売上（技術売上＋店販売上の合計）を集計する
+function aggregateSalesByStore(rows) {
+  const map = new Map();
+  rows.forEach((r) => {
+    const total = Number(r.sales || 0) + Number(r.productSales || 0);
+    map.set(r.store, (map.get(r.store) || 0) + total);
+  });
+  return Array.from(map.entries()).map(([name, sales]) => ({ name, 売上: sales }));
+}
+
 // 複数行（月・スタッフ）から各種指標を集計する共通ロジック
 function computeAggregate(rows) {
   const totalNew = rows.reduce((a, r) => a + Number(r.newC || 0), 0);
   const totalNewBookings = rows.reduce((a, r) => a + Number(r.newBookings || 0), 0);
   const totalRepeat = rows.reduce((a, r) => a + Number(r.repeatC || 0), 0);
   const totalRepeatBookings = rows.reduce((a, r) => a + Number(r.repeatBookings || 0), 0);
-  const totalSales = rows.reduce((a, r) => a + Number(r.sales || 0), 0);
+  const totalTechnicalSales = rows.reduce((a, r) => a + Number(r.sales || 0), 0);
+  const totalProductSales = rows.reduce((a, r) => a + Number(r.productSales || 0), 0);
+  const totalSales = totalTechnicalSales + totalProductSales;
   const totalCustomers = totalNew + totalRepeat;
   return {
     totalNew,
     totalNewBookings,
     totalRepeat,
     totalRepeatBookings,
+    totalTechnicalSales,
+    totalProductSales,
     totalSales,
     totalCustomers,
     newBookingRate: safeDiv(totalNewBookings, totalNew),
@@ -219,6 +233,7 @@ function resolveColumns(headerRow) {
   const storeIdx = idx(["店舗名", "店舗", "store"]);
   const monthIdx = idx(["報告月", "月", "month"]);
   const salesIdx = idx(["技術売上", "売上", "sales"]);
+  const productSalesIdx = idx(["店販売上", "店販", "productSales"]);
 
   const newFractionIdx = idx(["新規入客数"]);
   const newCIdx = idx(["新規", "newC"]);
@@ -241,6 +256,7 @@ function resolveColumns(headerRow) {
     storeIdx,
     monthIdx,
     salesIdx,
+    productSalesIdx,
     newFractionIdx,
     newCIdx,
     newBookingsIdx,
@@ -517,6 +533,9 @@ export default function App() {
   const [staffRows, setStaffRows] = useState(INITIAL_STAFF);
   const [importMsg, setImportMsg] = useState("");
   const [importStore, setImportStore] = useState("");
+  const [oaStore, setOaStore] = useState("");
+  const [oaSales, setOaSales] = useState("");
+  const [oaProductSales, setOaProductSales] = useState("");
   const [loadState, setLoadState] = useState("loading"); // loading | loaded | error
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
   const [user, setUser] = useState(null);
@@ -635,24 +654,25 @@ export default function App() {
   }, [storeFilteredStaff]);
 
   const storeCompareData = useMemo(
-    () =>
-      aggregateBy(
-        staffRows.filter((r) => r.month === effectiveMonth),
-        "store"
-      ).map((d) => ({ name: d.name, 売上: d.sales })),
+    () => aggregateSalesByStore(staffRows.filter((r) => r.month === effectiveMonth)),
     [staffRows, effectiveMonth]
   );
 
   const rankedStaff = useMemo(() => {
     return [...filteredStaff]
-      .map((r) => ({
-        ...r,
-        customerRepeatRate: safeDiv(Number(r.repeatC || 0), Number(r.newC || 0) + Number(r.repeatC || 0)),
-        newBookingRate: safeDiv(Number(r.newBookings || 0), Number(r.newC || 0)),
-        repeatBookingRate: safeDiv(Number(r.repeatBookings || 0), Number(r.repeatC || 0)),
-        avgSpend: safeDiv(Number(r.sales || 0), Number(r.newC || 0) + Number(r.repeatC || 0)),
-        anomalies: rowAnomalies(r),
-      }))
+      .filter((r) => !r.hidden)
+      .map((r) => {
+        const totalSales = Number(r.sales || 0) + Number(r.productSales || 0);
+        return {
+          ...r,
+          customerRepeatRate: safeDiv(Number(r.repeatC || 0), Number(r.newC || 0) + Number(r.repeatC || 0)),
+          newBookingRate: safeDiv(Number(r.newBookings || 0), Number(r.newC || 0)),
+          repeatBookingRate: safeDiv(Number(r.repeatBookings || 0), Number(r.repeatC || 0)),
+          totalSales,
+          avgSpend: safeDiv(totalSales, Number(r.newC || 0) + Number(r.repeatC || 0)),
+          anomalies: rowAnomalies(r),
+        };
+      })
       .sort((a, b) => b.repeatBookingRate - a.repeatBookingRate);
   }, [filteredStaff]);
 
@@ -674,13 +694,57 @@ export default function App() {
         repeatC: 0,
         repeatBookings: 0,
         sales: 0,
+        productSales: 0,
       },
     ]);
   };
 
+  // ---- 非表示のオーナー調整（管理者のみ編集可・スタッフ一覧には一切表示しない） ----
+  useEffect(() => {
+    if (!oaStore && storeNames.length > 0) setOaStore(storeNames[0]);
+  }, [storeNames, oaStore]);
+
+  const ownerRow = useMemo(() => {
+    if (!oaStore) return null;
+    const month = effectiveMonth || SEED_MONTH;
+    return staffRows.find((r) => r.hidden && r.store === oaStore && r.month === month) || null;
+  }, [staffRows, oaStore, effectiveMonth]);
+
+  useEffect(() => {
+    setOaSales(String(ownerRow ? ownerRow.sales || 0 : 0));
+    setOaProductSales(String(ownerRow ? ownerRow.productSales || 0 : 0));
+  }, [ownerRow]);
+
+  const saveOwnerAdjustment = () => {
+    if (!oaStore) return;
+    const month = effectiveMonth || SEED_MONTH;
+    setStaffRows((prev) => {
+      const idx = prev.findIndex((r) => r.hidden && r.store === oaStore && r.month === month);
+      const newRow = {
+        id: idx !== -1 ? prev[idx].id : uid("owner"),
+        name: "__owner__",
+        store: oaStore,
+        month,
+        newC: 0,
+        newBookings: 0,
+        repeatC: 0,
+        repeatBookings: 0,
+        sales: Number(oaSales) || 0,
+        productSales: Number(oaProductSales) || 0,
+        hidden: true,
+      };
+      if (idx !== -1) {
+        const copy = [...prev];
+        copy[idx] = newRow;
+        return copy;
+      }
+      return [...prev, newRow];
+    });
+  };
+
   const downloadTemplate = () => {
-    const header = "店舗,スタッフ名,新規,新規次回予約,リピート,リピート次回予約,売上\n";
-    const example = "渋谷店,山田太郎,10,4,20,18,500000\n";
+    const header = "店舗,スタッフ名,新規,新規次回予約,リピート,リピート次回予約,技術売上,店販売上\n";
+    const example = "渋谷店,山田太郎,10,4,20,18,500000,30000\n";
     const blob = new Blob(["\uFEFF" + header + example], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -754,10 +818,11 @@ export default function App() {
           }
 
           const sales = cols.salesIdx !== -1 ? Math.round(numOnly(row[cols.salesIdx])) : 0;
+          const productSales = cols.productSalesIdx !== -1 ? Math.round(numOnly(row[cols.productSalesIdx])) : 0;
 
-          if (newC === 0 && repeatC === 0 && sales === 0) continue; // 空行はスキップ
+          if (newC === 0 && repeatC === 0 && sales === 0 && productSales === 0) continue; // 空行はスキップ
 
-          parsed.push({ store, name, month, newC, newBookings, repeatC, repeatBookings, sales });
+          parsed.push({ store, name, month, newC, newBookings, repeatC, repeatBookings, sales, productSales });
         }
 
         if (parsed.length === 0) {
@@ -1086,7 +1151,7 @@ export default function App() {
                       </div>
                     </td>
                     <td style={{ padding: "10px 10px", textAlign: "right", color: INK_SOFT, fontVariantNumeric: "tabular-nums" }}>{yen(p.avgSpend)}</td>
-                    <td style={{ padding: "10px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{yen(p.sales)}</td>
+                    <td style={{ padding: "10px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{yen(p.totalSales)}</td>
                     <td style={{ padding: "10px 18px" }}>
                       <RatingBadge rate={p.repeatBookingRate} />
                     </td>
@@ -1139,9 +1204,9 @@ export default function App() {
           {isAdmin && (
             <div style={{ fontSize: 12, color: INK_SOFT, marginBottom: 20, lineHeight: 1.8 }}>
               共有いただいた「タイムスタンプ / お名前 / 店舗名 / 報告月 / 新規 / リピート / 既存 / リピート / 技術売上」の月次報告シートの列構成にそのまま対応しています（「リピート」列が2つありますが、直前が「新規」か「既存」かで自動的に区別します）。
-              また、大藤佳奈子・佐々木梨紗・滝澤麻美・新井智子（旧報告名義「金谷智子」も同一人物として自動変換）・小野木慶子・中村晴美・難波順一朗・難波幸平の8名については、シート上の店舗名列の記載に関わらず、名前から酒津店／児島店／会津若松店／福山店／岡山店を自動判定します。
+              また、大藤佳奈子・佐々木梨紗・滝澤麻美・新井智子（旧報告名義「金谷智子」も同一人物として自動変換）・小野木慶子・中村晴美・難波順一朗の7名については、シート上の店舗名列の記載に関わらず、名前から酒津店／児島店／会津若松店／福山店／岡山店を自動判定します。
               シートを開いて「ファイル→ダウンロード→カンマ区切り形式（.csv）」で書き出し、そのファイルをここに取り込んでください。
-              手入力の場合は、店舗 / スタッフ名 / 新規 / 新規次回予約 / リピート / リピート次回予約 / 売上　の形式でも読み込めます。同じ店舗・スタッフ・月のデータは上書きされるため、毎月同じファイルを読み込み直しても重複しません。
+              手入力の場合は、店舗 / スタッフ名 / 新規 / 新規次回予約 / リピート / リピート次回予約 / 技術売上 / 店販売上　の形式でも読み込めます（店販売上の列が無い場合は0として扱われます）。同じ店舗・スタッフ・月のデータは上書きされるため、毎月同じファイルを読み込み直しても重複しません。
               <br />
               サロンボードは外部向けのAPIを公開していないため、このアプリが自動で売上データを取得することはできません。スプレッドシートからCSV／Excelを出力し、そのファイルをここに取り込んでください。
             </div>
@@ -1171,13 +1236,14 @@ export default function App() {
                   <th style={{ textAlign: "right", padding: "6px 10px", fontWeight: 500 }}>新規次回予約</th>
                   <th style={{ textAlign: "right", padding: "6px 10px", fontWeight: 500 }}>リピート</th>
                   <th style={{ textAlign: "right", padding: "6px 10px", fontWeight: 500 }}>リピート次回予約</th>
-                  <th style={{ textAlign: "right", padding: "6px 10px", fontWeight: 500 }}>売上</th>
+                  <th style={{ textAlign: "right", padding: "6px 10px", fontWeight: 500 }}>技術売上</th>
+                  <th style={{ textAlign: "right", padding: "6px 10px", fontWeight: 500 }}>店販売上</th>
                   <th style={{ padding: "6px 4px" }}></th>
                   {isAdmin && <th style={{ padding: "6px 18px" }}></th>}
                 </tr>
               </thead>
               <tbody>
-                {staffRows.map((r) => {
+                {staffRows.filter((r) => !r.hidden).map((r) => {
                   const issues = rowAnomalies(r);
                   return (
                     <tr
@@ -1209,6 +1275,9 @@ export default function App() {
                       <td style={{ padding: "4px 10px" }}>
                         <NumberCell value={r.sales} onChange={(v) => updateStaff(r.id, "sales", v)} width={100} readOnly={!isAdmin} />
                       </td>
+                      <td style={{ padding: "4px 10px" }}>
+                        <NumberCell value={r.productSales || 0} onChange={(v) => updateStaff(r.id, "productSales", v)} width={100} readOnly={!isAdmin} />
+                      </td>
                       <td style={{ padding: "4px 10px", width: 18 }}>
                         {issues.length > 0 && <AlertTriangle size={14} style={{ color: PLUM }} title={issues.join(" / ")} />}
                       </td>
@@ -1223,6 +1292,53 @@ export default function App() {
               </tbody>
             </table>
           </div>
+
+          {isAdmin && (
+            <div style={{ background: "#fff", border: `1px dashed ${LINE}`, borderRadius: 4, padding: "16px 18px", marginTop: 18 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>オーナー調整（非表示・{ADMIN_EMAIL}にのみ表示）</div>
+              <div style={{ fontSize: 11.5, color: INK_SOFT, marginBottom: 12, lineHeight: 1.6 }}>
+                ここで入力した金額は、スタッフ一覧やCSVエクスポートなど他の人が見る画面には一切表示されず、店舗の売上合計（KPI・グラフ）にのみ加算されます。対象月：{effectiveMonth || SEED_MONTH}
+              </div>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <select
+                  value={oaStore}
+                  onChange={(e) => setOaStore(e.target.value)}
+                  style={{ border: `1px solid ${LINE}`, borderRadius: 4, padding: "7px 10px", fontSize: 12.5, fontFamily: "'Noto Sans JP', sans-serif" }}
+                >
+                  {storeNames.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+                <label style={{ fontSize: 12, color: INK_SOFT, display: "flex", alignItems: "center", gap: 6 }}>
+                  技術売上
+                  <input
+                    type="number"
+                    value={oaSales}
+                    onChange={(e) => setOaSales(e.target.value)}
+                    style={{ border: `1px solid ${LINE}`, borderRadius: 4, padding: "6px 8px", fontSize: 12.5, width: 110 }}
+                  />
+                </label>
+                <label style={{ fontSize: 12, color: INK_SOFT, display: "flex", alignItems: "center", gap: 6 }}>
+                  店販売上
+                  <input
+                    type="number"
+                    value={oaProductSales}
+                    onChange={(e) => setOaProductSales(e.target.value)}
+                    style={{ border: `1px solid ${LINE}`, borderRadius: 4, padding: "6px 8px", fontSize: 12.5, width: 110 }}
+                  />
+                </label>
+                <button
+                  className="sd-btn"
+                  onClick={saveOwnerAdjustment}
+                  style={{ background: INK, color: PAPER, border: "none", borderRadius: 4, padding: "7px 16px", fontSize: 12.5, fontWeight: 600 }}
+                >
+                  保存
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
