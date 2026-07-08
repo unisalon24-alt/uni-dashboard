@@ -59,6 +59,10 @@ const NAME_ALIASES = {
 // 店舗タブの表示順（直営 → FC）
 const STORE_ORDER = ["児島店", "酒津店", "会津若松店", "岡山店", "福山店"];
 
+// ダッシュボードのスタッフ一覧（全員が見られる画面）には表示しないが、
+// 店舗の売上合計・グラフには通常どおり加算される名前（データ入力タブでは通常どおり見える）
+const DASHBOARD_HIDDEN_NAMES = ["難波幸平"];
+
 const STAFF_STORE_MAP = {
   大藤佳奈子: "酒津店",
   佐々木梨紗: "酒津店",
@@ -98,6 +102,11 @@ const REPORTED_ROWS = [
   { name: "難波順一朗", month: "2026年5月", newC: 13, newBookings: 12, repeatC: 32, repeatBookings: 32, sales: 738_100 },
   { name: "難波順一朗", month: "2026年6月", newC: 10, newBookings: 10, repeatC: 34, repeatBookings: 33, sales: 667_100 },
   // 難波幸平（児島店）：ご本人が売上等を直接入力予定
+  { name: "難波幸平", store: "児島店", month: "2026年1月", newC: 0, newBookings: 0, repeatC: 0, repeatBookings: 0, sales: 0, productSales: 0 },
+  { name: "難波幸平", store: "児島店", month: "2026年2月", newC: 0, newBookings: 0, repeatC: 0, repeatBookings: 0, sales: 0, productSales: 0 },
+  { name: "難波幸平", store: "児島店", month: "2026年3月", newC: 0, newBookings: 0, repeatC: 0, repeatBookings: 0, sales: 0, productSales: 0 },
+  { name: "難波幸平", store: "児島店", month: "2026年4月", newC: 0, newBookings: 0, repeatC: 0, repeatBookings: 0, sales: 0, productSales: 0 },
+  { name: "難波幸平", store: "児島店", month: "2026年5月", newC: 0, newBookings: 0, repeatC: 0, repeatBookings: 0, sales: 0, productSales: 0 },
   { name: "難波幸平", store: "児島店", month: "2026年6月", newC: 0, newBookings: 0, repeatC: 0, repeatBookings: 0, sales: 0, productSales: 0 },
   // 中村晴美（福山店）
   { name: "中村晴美", month: "2026年2月", newC: 5, newBookings: 2, repeatC: 72, repeatBookings: 34, sales: 1_219_550 },
@@ -653,6 +662,7 @@ export default function App() {
 
   const rankedStaff = useMemo(() => {
     return [...filteredStaff]
+      .filter((r) => !DASHBOARD_HIDDEN_NAMES.includes(r.name))
       .map((r) => {
         const totalSales = Number(r.sales || 0) + Number(r.productSales || 0);
         return {
@@ -975,11 +985,27 @@ export default function App() {
             />
             <KpiCard
               icon={<JapaneseYen size={16} />}
-              label="売上"
+              label="合計売上"
               value={yen(kpi.totalSales)}
-              sub={selected === "all" ? "全店舗合計" : "当店合計"}
+              sub={`技術売上 ${yen(kpi.totalTechnicalSales)} ・ 店販売上 ${yen(kpi.totalProductSales)}`}
               delta={prevKpi && <Delta diff={kpi.totalSales - prevKpi.totalSales} unit="yen" />}
               accent={INK}
+            />
+            <KpiCard
+              icon={<JapaneseYen size={16} />}
+              label="技術売上"
+              value={yen(kpi.totalTechnicalSales)}
+              sub={selected === "all" ? "全店舗合計" : "当店合計"}
+              delta={prevKpi && <Delta diff={kpi.totalTechnicalSales - prevKpi.totalTechnicalSales} unit="yen" />}
+              accent={PLUM}
+            />
+            <KpiCard
+              icon={<JapaneseYen size={16} />}
+              label="店販売上"
+              value={yen(kpi.totalProductSales)}
+              sub={selected === "all" ? "全店舗合計" : "当店合計"}
+              delta={prevKpi && <Delta diff={kpi.totalProductSales - prevKpi.totalProductSales} unit="yen" />}
+              accent={GOLD}
             />
             <KpiCard
               icon={<Wallet size={16} />}
@@ -1068,7 +1094,9 @@ export default function App() {
                   <th style={{ textAlign: "left", padding: "8px 10px", fontWeight: 500 }}>次回予約率（新規）</th>
                   <th style={{ textAlign: "left", padding: "8px 10px", fontWeight: 500 }}>次回予約率（顧客）</th>
                   <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 500 }}>客単価</th>
-                  <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 500 }}>売上</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 500 }}>技術売上</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 500 }}>店販売上</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 500 }}>合計売上</th>
                   <th style={{ textAlign: "left", padding: "8px 18px", fontWeight: 500 }}>評価</th>
                 </tr>
               </thead>
@@ -1100,6 +1128,8 @@ export default function App() {
                       </div>
                     </td>
                     <td style={{ padding: "10px 10px", textAlign: "right", color: INK_SOFT, fontVariantNumeric: "tabular-nums" }}>{yen(p.avgSpend)}</td>
+                    <td style={{ padding: "10px 10px", textAlign: "right", color: INK_SOFT, fontVariantNumeric: "tabular-nums" }}>{yen(p.sales)}</td>
+                    <td style={{ padding: "10px 10px", textAlign: "right", color: INK_SOFT, fontVariantNumeric: "tabular-nums" }}>{yen(p.productSales)}</td>
                     <td style={{ padding: "10px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{yen(p.totalSales)}</td>
                     <td style={{ padding: "10px 18px" }}>
                       <RatingBadge newBookingRate={p.newBookingRate} repeatBookingRate={p.repeatBookingRate} />
