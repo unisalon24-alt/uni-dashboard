@@ -59,6 +59,10 @@ const NAME_ALIASES = {
 // 店舗タブの表示順（直営 → FC）
 const STORE_ORDER = ["児島店", "酒津店", "会津若松店", "岡山店", "福山店"];
 
+// ダッシュボードのスタッフ一覧（全員が見られる画面）には表示しないが、
+// 店舗の売上合計・グラフには通常どおり加算される名前（データ入力タブでは通常どおり見える）
+const DASHBOARD_HIDDEN_NAMES = ["難波幸平"];
+
 const STAFF_STORE_MAP = {
   大藤佳奈子: "酒津店",
   佐々木梨紗: "酒津店",
@@ -97,9 +101,13 @@ const REPORTED_ROWS = [
   { name: "難波順一朗", month: "2026年4月", newC: 7, newBookings: 6, repeatC: 28, repeatBookings: 26, sales: 595_700 },
   { name: "難波順一朗", month: "2026年5月", newC: 13, newBookings: 12, repeatC: 32, repeatBookings: 32, sales: 738_100 },
   { name: "難波順一朗", month: "2026年6月", newC: 10, newBookings: 10, repeatC: 34, repeatBookings: 33, sales: 667_100 },
-  // 児島店：オーナー分の売上のみ計上。hidden:true のためスタッフ一覧には一切表示されず、
-  // 店舗の売上合計にのみ加算される（管理者だけが専用パネルから編集できる）。
-  { name: "__owner__", store: "児島店", month: "2026年6月", newC: 0, newBookings: 0, repeatC: 0, repeatBookings: 0, sales: 0, productSales: 0, hidden: true },
+  // 難波幸平（児島店）：ご本人が売上等を直接入力予定
+  { name: "難波幸平", store: "児島店", month: "2026年1月", newC: 0, newBookings: 0, repeatC: 0, repeatBookings: 0, sales: 0, productSales: 0 },
+  { name: "難波幸平", store: "児島店", month: "2026年2月", newC: 0, newBookings: 0, repeatC: 0, repeatBookings: 0, sales: 0, productSales: 0 },
+  { name: "難波幸平", store: "児島店", month: "2026年3月", newC: 0, newBookings: 0, repeatC: 0, repeatBookings: 0, sales: 0, productSales: 0 },
+  { name: "難波幸平", store: "児島店", month: "2026年4月", newC: 0, newBookings: 0, repeatC: 0, repeatBookings: 0, sales: 0, productSales: 0 },
+  { name: "難波幸平", store: "児島店", month: "2026年5月", newC: 0, newBookings: 0, repeatC: 0, repeatBookings: 0, sales: 0, productSales: 0 },
+  { name: "難波幸平", store: "児島店", month: "2026年6月", newC: 0, newBookings: 0, repeatC: 0, repeatBookings: 0, sales: 0, productSales: 0 },
   // 中村晴美（福山店）
   { name: "中村晴美", month: "2026年2月", newC: 5, newBookings: 2, repeatC: 72, repeatBookings: 34, sales: 1_219_550 },
   { name: "中村晴美", month: "2026年3月", newC: 11, newBookings: 8, repeatC: 79, repeatBookings: 34, sales: 1_299_150 },
@@ -279,9 +287,9 @@ const PAPER_2 = "#F1E8D8";
 const LINE = "#E3D6BC";
 const PLUM = "#6E4A56";
 
-// 実データでは店舗トップ層でもリピート率85〜91%程度に収まっていたため、
-// 「ゴールド」評価の基準は85%に設定（単一基準・シルバー相当は廃止）。
-const RATING_THRESHOLD = 0.85;
+// 王冠は「次回予約率（新規）80%以上」かつ「次回予約率（顧客）90%以上」を両方達成した場合のみ表示
+const NEW_BOOKING_THRESHOLD = 0.8;
+const REPEAT_BOOKING_THRESHOLD = 0.9;
 
 // 全員共有の保存状態を小さく表示する
 // 管理者ログイン用の小さなフォーム
@@ -410,14 +418,10 @@ function SaveStatus({ loadState, saveState }) {
   return null;
 }
 
-function RatingBadge({ rate }) {
-  if (rate >= RATING_THRESHOLD) {
-    return (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-        <Crown size={17} style={{ color: GOLD, filter: `drop-shadow(0 0 4px ${GOLD_LIGHT})` }} fill={GOLD} />
-        <span style={{ fontSize: 11.5, color: GOLD, fontWeight: 700, letterSpacing: 0.5 }}>ゴールド</span>
-      </span>
-    );
+function RatingBadge({ newBookingRate, repeatBookingRate }) {
+  const achieved = newBookingRate >= NEW_BOOKING_THRESHOLD && repeatBookingRate >= REPEAT_BOOKING_THRESHOLD;
+  if (achieved) {
+    return <Crown size={18} style={{ color: GOLD, filter: `drop-shadow(0 0 4px ${GOLD_LIGHT})` }} fill={GOLD} />;
   }
   return <span style={{ fontSize: 12, color: INK_SOFT }}>—</span>;
 }
@@ -533,9 +537,7 @@ export default function App() {
   const [staffRows, setStaffRows] = useState(INITIAL_STAFF);
   const [importMsg, setImportMsg] = useState("");
   const [importStore, setImportStore] = useState("");
-  const [oaStore, setOaStore] = useState("");
-  const [oaSales, setOaSales] = useState("");
-  const [oaProductSales, setOaProductSales] = useState("");
+
   const [loadState, setLoadState] = useState("loading"); // loading | loaded | error
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
   const [user, setUser] = useState(null);
@@ -660,7 +662,7 @@ export default function App() {
 
   const rankedStaff = useMemo(() => {
     return [...filteredStaff]
-      .filter((r) => !r.hidden)
+      .filter((r) => !DASHBOARD_HIDDEN_NAMES.includes(r.name))
       .map((r) => {
         const totalSales = Number(r.sales || 0) + Number(r.productSales || 0);
         return {
@@ -697,49 +699,6 @@ export default function App() {
         productSales: 0,
       },
     ]);
-  };
-
-  // ---- 非表示のオーナー調整（管理者のみ編集可・スタッフ一覧には一切表示しない） ----
-  useEffect(() => {
-    if (!oaStore && storeNames.length > 0) setOaStore(storeNames[0]);
-  }, [storeNames, oaStore]);
-
-  const ownerRow = useMemo(() => {
-    if (!oaStore) return null;
-    const month = effectiveMonth || SEED_MONTH;
-    return staffRows.find((r) => r.hidden && r.store === oaStore && r.month === month) || null;
-  }, [staffRows, oaStore, effectiveMonth]);
-
-  useEffect(() => {
-    setOaSales(String(ownerRow ? ownerRow.sales || 0 : 0));
-    setOaProductSales(String(ownerRow ? ownerRow.productSales || 0 : 0));
-  }, [ownerRow]);
-
-  const saveOwnerAdjustment = () => {
-    if (!oaStore) return;
-    const month = effectiveMonth || SEED_MONTH;
-    setStaffRows((prev) => {
-      const idx = prev.findIndex((r) => r.hidden && r.store === oaStore && r.month === month);
-      const newRow = {
-        id: idx !== -1 ? prev[idx].id : uid("owner"),
-        name: "__owner__",
-        store: oaStore,
-        month,
-        newC: 0,
-        newBookings: 0,
-        repeatC: 0,
-        repeatBookings: 0,
-        sales: Number(oaSales) || 0,
-        productSales: Number(oaProductSales) || 0,
-        hidden: true,
-      };
-      if (idx !== -1) {
-        const copy = [...prev];
-        copy[idx] = newRow;
-        return copy;
-      }
-      return [...prev, newRow];
-    });
   };
 
   const downloadTemplate = () => {
@@ -1026,11 +985,27 @@ export default function App() {
             />
             <KpiCard
               icon={<JapaneseYen size={16} />}
-              label="売上"
+              label="合計売上"
               value={yen(kpi.totalSales)}
-              sub={selected === "all" ? "全店舗合計" : "当店合計"}
+              sub={`技術売上 ${yen(kpi.totalTechnicalSales)} ・ 店販売上 ${yen(kpi.totalProductSales)}`}
               delta={prevKpi && <Delta diff={kpi.totalSales - prevKpi.totalSales} unit="yen" />}
               accent={INK}
+            />
+            <KpiCard
+              icon={<JapaneseYen size={16} />}
+              label="技術売上"
+              value={yen(kpi.totalTechnicalSales)}
+              sub={selected === "all" ? "全店舗合計" : "当店合計"}
+              delta={prevKpi && <Delta diff={kpi.totalTechnicalSales - prevKpi.totalTechnicalSales} unit="yen" />}
+              accent={PLUM}
+            />
+            <KpiCard
+              icon={<JapaneseYen size={16} />}
+              label="店販売上"
+              value={yen(kpi.totalProductSales)}
+              sub={selected === "all" ? "全店舗合計" : "当店合計"}
+              delta={prevKpi && <Delta diff={kpi.totalProductSales - prevKpi.totalProductSales} unit="yen" />}
+              accent={GOLD}
             />
             <KpiCard
               icon={<Wallet size={16} />}
@@ -1119,7 +1094,9 @@ export default function App() {
                   <th style={{ textAlign: "left", padding: "8px 10px", fontWeight: 500 }}>次回予約率（新規）</th>
                   <th style={{ textAlign: "left", padding: "8px 10px", fontWeight: 500 }}>次回予約率（顧客）</th>
                   <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 500 }}>客単価</th>
-                  <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 500 }}>売上</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 500 }}>技術売上</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 500 }}>店販売上</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 500 }}>合計売上</th>
                   <th style={{ textAlign: "left", padding: "8px 18px", fontWeight: 500 }}>評価</th>
                 </tr>
               </thead>
@@ -1143,7 +1120,7 @@ export default function App() {
                             style={{
                               width: `${Math.min(p.repeatBookingRate * 100, 100)}%`,
                               height: "100%",
-                              background: p.repeatBookingRate >= RATING_THRESHOLD ? GOLD : TEAL,
+                              background: p.repeatBookingRate >= REPEAT_BOOKING_THRESHOLD ? GOLD : TEAL,
                             }}
                           />
                         </div>
@@ -1151,16 +1128,18 @@ export default function App() {
                       </div>
                     </td>
                     <td style={{ padding: "10px 10px", textAlign: "right", color: INK_SOFT, fontVariantNumeric: "tabular-nums" }}>{yen(p.avgSpend)}</td>
+                    <td style={{ padding: "10px 10px", textAlign: "right", color: INK_SOFT, fontVariantNumeric: "tabular-nums" }}>{yen(p.sales)}</td>
+                    <td style={{ padding: "10px 10px", textAlign: "right", color: INK_SOFT, fontVariantNumeric: "tabular-nums" }}>{yen(p.productSales)}</td>
                     <td style={{ padding: "10px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{yen(p.totalSales)}</td>
                     <td style={{ padding: "10px 18px" }}>
-                      <RatingBadge rate={p.repeatBookingRate} />
+                      <RatingBadge newBookingRate={p.newBookingRate} repeatBookingRate={p.repeatBookingRate} />
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <div style={{ padding: "10px 18px", fontSize: 11.5, color: INK_SOFT }}>
-              評価「ゴールド」：次回予約率（顧客） 85%以上
+              王冠：次回予約率（新規）80%以上　かつ　次回予約率（顧客）90%以上　を両方達成
             </div>
           </div>
         </>
@@ -1243,7 +1222,7 @@ export default function App() {
                 </tr>
               </thead>
               <tbody>
-                {staffRows.filter((r) => !r.hidden).map((r) => {
+                {staffRows.map((r) => {
                   const issues = rowAnomalies(r);
                   return (
                     <tr
@@ -1292,53 +1271,6 @@ export default function App() {
               </tbody>
             </table>
           </div>
-
-          {isAdmin && (
-            <div style={{ background: "#fff", border: `1px dashed ${LINE}`, borderRadius: 4, padding: "16px 18px", marginTop: 18 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>オーナー調整（非表示・{ADMIN_EMAIL}にのみ表示）</div>
-              <div style={{ fontSize: 11.5, color: INK_SOFT, marginBottom: 12, lineHeight: 1.6 }}>
-                ここで入力した金額は、スタッフ一覧やCSVエクスポートなど他の人が見る画面には一切表示されず、店舗の売上合計（KPI・グラフ）にのみ加算されます。対象月：{effectiveMonth || SEED_MONTH}
-              </div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <select
-                  value={oaStore}
-                  onChange={(e) => setOaStore(e.target.value)}
-                  style={{ border: `1px solid ${LINE}`, borderRadius: 4, padding: "7px 10px", fontSize: 12.5, fontFamily: "'Noto Sans JP', sans-serif" }}
-                >
-                  {storeNames.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-                <label style={{ fontSize: 12, color: INK_SOFT, display: "flex", alignItems: "center", gap: 6 }}>
-                  技術売上
-                  <input
-                    type="number"
-                    value={oaSales}
-                    onChange={(e) => setOaSales(e.target.value)}
-                    style={{ border: `1px solid ${LINE}`, borderRadius: 4, padding: "6px 8px", fontSize: 12.5, width: 110 }}
-                  />
-                </label>
-                <label style={{ fontSize: 12, color: INK_SOFT, display: "flex", alignItems: "center", gap: 6 }}>
-                  店販売上
-                  <input
-                    type="number"
-                    value={oaProductSales}
-                    onChange={(e) => setOaProductSales(e.target.value)}
-                    style={{ border: `1px solid ${LINE}`, borderRadius: 4, padding: "6px 8px", fontSize: 12.5, width: 110 }}
-                  />
-                </label>
-                <button
-                  className="sd-btn"
-                  onClick={saveOwnerAdjustment}
-                  style={{ background: INK, color: PAPER, border: "none", borderRadius: 4, padding: "7px 16px", fontSize: 12.5, fontWeight: 600 }}
-                >
-                  保存
-                </button>
-              </div>
-            </div>
-          )}
         </>
       )}
     </div>
