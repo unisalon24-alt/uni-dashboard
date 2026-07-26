@@ -90,14 +90,33 @@ function aggregate(visits) {
 
 function KpiCard({ icon, label, value, sub, accent }) {
   return (
-    <div style={{ background: PAPER_2, border: `1px solid ${LINE}`, borderRadius: 4, padding: "18px 20px", flex: "1 1 200px", minWidth: 200, position: "relative", overflow: "hidden" }}>
-      <div style={{ position: "absolute", top: 0, left: 0, width: 3, height: "100%", background: accent }} />
-      <div style={{ display: "flex", alignItems: "center", gap: 8, color: INK_SOFT, marginBottom: 8 }}>
+    <div style={{ background: PAPER_2, border: `1px solid ${LINE}`, borderRadius: 14, padding: "20px 22px", flex: "1 1 200px", minWidth: 200, position: "relative", overflow: "hidden" }}>
+      <div style={{ position: "absolute", top: 14, left: 14, width: 8, height: 8, borderRadius: 8, background: accent }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 8, color: INK_SOFT, marginBottom: 10, marginLeft: 16 }}>
         {icon}
         <span style={{ fontSize: 12, letterSpacing: 1 }}>{label}</span>
       </div>
       <div style={{ fontFamily: "'Shippori Mincho', serif", fontSize: 28, color: INK, lineHeight: 1.1 }}>{value}</div>
-      {sub && <div style={{ fontSize: 11.5, color: INK_SOFT, marginTop: 5 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 11.5, color: INK_SOFT, marginTop: 6 }}>{sub}</div>}
+    </div>
+  );
+}
+
+// メニュー・商品それぞれの「合計ランキング」を、棒つきのやさしい一覧で見せる
+function RankingList({ rows, nameKey, unit = "yen" }) {
+  const max = Math.max(1, ...rows.map((r) => r.total));
+  return (
+    <div>
+      {rows.map((r, i) => (
+        <div key={r[nameKey]} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: i < rows.length - 1 ? `1px solid ${LINE}` : "none" }}>
+          <div style={{ width: 22, fontSize: 12, color: INK_SOFT, fontFamily: "'Shippori Mincho', serif", flexShrink: 0 }}>{i + 1}</div>
+          <div style={{ flex: "0 0 180px", fontSize: 13, fontWeight: 600, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r[nameKey]}</div>
+          <div style={{ flex: 1, background: PAPER_2, borderRadius: 8, height: 10, overflow: "hidden" }}>
+            <div style={{ width: `${Math.max(4, (r.total / max) * 100)}%`, height: "100%", background: GOLD, borderRadius: 8 }} />
+          </div>
+          <div style={{ flex: "0 0 90px", textAlign: "right", fontSize: 13, fontVariantNumeric: "tabular-nums", color: INK }}>{unit === "yen" ? yen(r.total) : r.total}</div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -117,6 +136,9 @@ export default function KarteAnalytics() {
   const [period, setPeriod] = useState("month"); // "day" | "month" | "year"
   const [selectedMonth, setSelectedMonth] = useState("");
   const [selectedYear, setSelectedYear] = useState("");
+  const [showDailyTable, setShowDailyTable] = useState(false);
+  const [showMenuDetail, setShowMenuDetail] = useState(false);
+  const [showProductDetail, setShowProductDetail] = useState(false);
 
   useEffect(() => {
     const unsub = subscribeKarteAuthState((u) => setKarteUser(u));
@@ -282,7 +304,7 @@ export default function KarteAnalytics() {
   // ---- 未ログイン ----
   if (!karteUser) {
     return (
-      <div style={{ maxWidth: 420, margin: "40px auto", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 4, padding: 28 }}>
+      <div style={{ maxWidth: 420, margin: "40px auto", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 28 }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>来店データ分析（カルテ連携）</div>
         <div style={{ fontSize: 12.5, color: INK_SOFT, marginBottom: 18, lineHeight: 1.7 }}>
           カルテアプリ（uni-karte）の来店記録をもとに、日別・月別・年間・メニュー別・商品別・スタッフ別の売上を自動で集計します。全店舗を横断して閲覧できる専用アカウントでログインしてください。
@@ -294,13 +316,13 @@ export default function KarteAnalytics() {
             placeholder="パスワード"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${LINE}`, borderRadius: 4, padding: "9px 10px", fontSize: 13, marginBottom: 10 }}
+            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${LINE}`, borderRadius: 10, padding: "10px 12px", fontSize: 13, marginBottom: 10 }}
           />
           {loginError && <div style={{ fontSize: 12, color: PLUM, marginBottom: 10 }}>{loginError}</div>}
           <button
             type="submit"
             disabled={loggingIn}
-            style={{ width: "100%", background: INK, color: "#FBF7EF", border: "none", borderRadius: 4, padding: "10px 0", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+            style={{ width: "100%", background: INK, color: "#FBF7EF", border: "none", borderRadius: 10, padding: "11px 0", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
           >
             <LogIn size={14} /> {loggingIn ? "ログイン中…" : "ログイン"}
           </button>
@@ -320,13 +342,13 @@ export default function KarteAnalytics() {
           <button
             onClick={doFetch}
             disabled={fetching}
-            style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff", border: `1px solid ${LINE}`, color: INK, borderRadius: 4, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}
+            style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff", border: `1px solid ${LINE}`, color: INK, borderRadius: 999, padding: "7px 16px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}
           >
             <RefreshCw size={13} /> {fetching ? "取得中…" : "最新データを取得"}
           </button>
           <button
             onClick={() => logoutFromKarte()}
-            style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: `1px solid ${LINE}`, color: INK_SOFT, borderRadius: 4, padding: "7px 14px", fontSize: 12.5, cursor: "pointer" }}
+            style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: `1px solid ${LINE}`, color: INK_SOFT, borderRadius: 999, padding: "7px 16px", fontSize: 12.5, cursor: "pointer" }}
           >
             <LogOut size={13} /> ログアウト
           </button>
@@ -334,7 +356,7 @@ export default function KarteAnalytics() {
       </div>
 
       {fetchError && (
-        <div style={{ fontSize: 12.5, color: PLUM, background: "rgba(184,137,46,0.08)", border: `1px solid ${LINE}`, borderRadius: 4, padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{ fontSize: 12.5, color: PLUM, background: "rgba(184,137,46,0.08)", border: `1px solid ${LINE}`, borderRadius: 12, padding: "12px 16px", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
           <AlertTriangle size={14} /> {fetchError}
         </div>
       )}
@@ -347,14 +369,14 @@ export default function KarteAnalytics() {
         <>
           {/* store tabs + period toggle */}
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginBottom: 18 }}>
-            <div style={{ display: "inline-flex", gap: 6, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 4, padding: 4, flexWrap: "wrap" }}>
+            <div style={{ display: "inline-flex", gap: 6, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 999, padding: 4, flexWrap: "wrap" }}>
               {[{ id: "all", name: "全店舗" }, ...storeNames.map((s) => ({ id: s, name: s }))].map((t) => (
                 <div
                   key={t.id}
                   onClick={() => setSelectedStore(t.id)}
                   style={{
                     padding: "8px 16px",
-                    borderRadius: 3,
+                    borderRadius: 999,
                     fontSize: 13.5,
                     fontWeight: selectedStore === t.id ? 700 : 500,
                     background: selectedStore === t.id ? INK : "transparent",
@@ -366,7 +388,7 @@ export default function KarteAnalytics() {
                 </div>
               ))}
             </div>
-            <div style={{ display: "inline-flex", gap: 6, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 4, padding: 4 }}>
+            <div style={{ display: "inline-flex", gap: 6, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 999, padding: 4 }}>
               {[
                 { id: "day", name: "日別" },
                 { id: "month", name: "月次" },
@@ -377,7 +399,7 @@ export default function KarteAnalytics() {
                   onClick={() => setPeriod(t.id)}
                   style={{
                     padding: "8px 14px",
-                    borderRadius: 3,
+                    borderRadius: 999,
                     fontSize: 13,
                     fontWeight: period === t.id ? 700 : 500,
                     background: period === t.id ? INK : "transparent",
@@ -393,7 +415,7 @@ export default function KarteAnalytics() {
               <select
                 value={effectiveMonth}
                 onChange={(e) => setSelectedMonth(e.target.value)}
-                style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 4, padding: "9px 12px", fontSize: 13.5, color: INK }}
+                style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 999, padding: "9px 16px", fontSize: 13.5, color: INK }}
               >
                 {availableMonths.map((m) => (
                   <option key={m} value={m}>
@@ -406,7 +428,7 @@ export default function KarteAnalytics() {
               <select
                 value={effectiveYear || ""}
                 onChange={(e) => setSelectedYear(e.target.value)}
-                style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 4, padding: "9px 12px", fontSize: 13.5, color: INK }}
+                style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 999, padding: "9px 16px", fontSize: 13.5, color: INK }}
               >
                 {availableYears.map((y) => (
                   <option key={y} value={y}>
@@ -427,51 +449,59 @@ export default function KarteAnalytics() {
 
           {/* daily chart + table (日別モード) */}
           {period === "day" && dailyRows.length > 0 && (
-            <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 4, padding: 18, marginBottom: 22, overflowX: "auto" }}>
+            <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 20, marginBottom: 20, overflowX: "auto" }}>
               <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>{effectiveMonth} 日別売上（{selectedStore === "all" ? "全店舗" : selectedStore}）</div>
-              <ResponsiveContainer width="100%" height={220}>
+              <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={dailyRows} margin={{ left: -10 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={LINE} vertical={false} />
                   <XAxis dataKey="day" tick={{ fontSize: 11, fill: INK_SOFT }} tickFormatter={(d) => `${d}日`} />
                   <YAxis tick={{ fontSize: 11, fill: INK_SOFT }} tickFormatter={(v) => `${Math.round(v / 10000)}万`} />
-                  <Tooltip formatter={(v) => yen(v)} labelFormatter={(d) => `${d}日`} contentStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="totalSales" name="売上" fill={INK} radius={[3, 3, 0, 0]} />
+                  <Tooltip formatter={(v) => yen(v)} labelFormatter={(d) => `${d}日`} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                  <Bar dataKey="totalSales" name="売上" fill={GOLD} radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, marginTop: 16, minWidth: 640 }}>
-                <thead>
-                  <tr style={{ color: INK_SOFT, borderBottom: `1px solid ${LINE}` }}>
-                    <th style={{ textAlign: "left", padding: "6px 10px" }}>日</th>
-                    <th style={{ textAlign: "right", padding: "6px 10px" }}>技術売上</th>
-                    <th style={{ textAlign: "right", padding: "6px 10px" }}>店販売上</th>
-                    <th style={{ textAlign: "right", padding: "6px 10px" }}>合計売上</th>
-                    <th style={{ textAlign: "right", padding: "6px 10px" }}>客単価</th>
-                    <th style={{ textAlign: "right", padding: "6px 10px" }}>来店数</th>
-                    <th style={{ textAlign: "right", padding: "6px 10px" }}>新規</th>
-                    <th style={{ textAlign: "right", padding: "6px 10px" }}>既存</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dailyRows.map((d) => (
-                    <tr key={d.day} style={{ borderBottom: `1px solid ${LINE}` }}>
-                      <td style={{ padding: "6px 10px", fontWeight: 600 }}>{d.day}日</td>
-                      <td style={{ padding: "6px 10px", textAlign: "right", color: INK_SOFT }}>{yen(d.technicalSales)}</td>
-                      <td style={{ padding: "6px 10px", textAlign: "right", color: INK_SOFT }}>{yen(d.productSales)}</td>
-                      <td style={{ padding: "6px 10px", textAlign: "right" }}>{yen(d.totalSales)}</td>
-                      <td style={{ padding: "6px 10px", textAlign: "right", color: INK_SOFT }}>{yen(d.avgSpend)}</td>
-                      <td style={{ padding: "6px 10px", textAlign: "right" }}>{d.totalCount}</td>
-                      <td style={{ padding: "6px 10px", textAlign: "right" }}>{d.newCount}</td>
-                      <td style={{ padding: "6px 10px", textAlign: "right" }}>{d.repeatCount}</td>
+              <button
+                onClick={() => setShowDailyTable((v) => !v)}
+                style={{ marginTop: 12, background: "transparent", border: "none", color: TEAL, fontSize: 12.5, fontWeight: 600, cursor: "pointer", padding: 0 }}
+              >
+                {showDailyTable ? "日ごとの表を閉じる ▲" : "日ごとの表で詳しく見る ▼"}
+              </button>
+              {showDailyTable && (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, marginTop: 14, minWidth: 640 }}>
+                  <thead>
+                    <tr style={{ color: INK_SOFT, borderBottom: `1px solid ${LINE}` }}>
+                      <th style={{ textAlign: "left", padding: "8px 10px" }}>日</th>
+                      <th style={{ textAlign: "right", padding: "8px 10px" }}>技術売上</th>
+                      <th style={{ textAlign: "right", padding: "8px 10px" }}>店販売上</th>
+                      <th style={{ textAlign: "right", padding: "8px 10px" }}>合計売上</th>
+                      <th style={{ textAlign: "right", padding: "8px 10px" }}>客単価</th>
+                      <th style={{ textAlign: "right", padding: "8px 10px" }}>来店数</th>
+                      <th style={{ textAlign: "right", padding: "8px 10px" }}>新規</th>
+                      <th style={{ textAlign: "right", padding: "8px 10px" }}>既存</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {dailyRows.map((d, i) => (
+                      <tr key={d.day} style={{ background: i % 2 === 1 ? PAPER_2 : "transparent", borderRadius: 8 }}>
+                        <td style={{ padding: "8px 10px", fontWeight: 600, borderRadius: "8px 0 0 8px" }}>{d.day}日</td>
+                        <td style={{ padding: "8px 10px", textAlign: "right", color: INK_SOFT }}>{yen(d.technicalSales)}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "right", color: INK_SOFT }}>{yen(d.productSales)}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "right" }}>{yen(d.totalSales)}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "right", color: INK_SOFT }}>{yen(d.avgSpend)}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "right" }}>{d.totalCount}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "right" }}>{d.newCount}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "right", borderRadius: "0 8px 8px 0" }}>{d.repeatCount}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           )}
 
           {/* annual monthly table (年間モード) */}
           {period === "year" && yearMonthlyRows.length > 0 && (
-            <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 4, padding: 18, marginBottom: 22, overflowX: "auto" }}>
+            <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 20, marginBottom: 20, overflowX: "auto" }}>
               <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>{effectiveYear}年 月別内訳（{selectedStore === "all" ? "全店舗" : selectedStore}）</div>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 640 }}>
                 <thead>
@@ -486,8 +516,8 @@ export default function KarteAnalytics() {
                   </tr>
                 </thead>
                 <tbody>
-                  {yearMonthlyRows.map((m) => (
-                    <tr key={m.month} style={{ borderBottom: `1px solid ${LINE}` }}>
+                  {yearMonthlyRows.map((m, i) => (
+                    <tr key={m.month} style={{ background: i % 2 === 1 ? PAPER_2 : "transparent" }}>
                       <td style={{ padding: "6px 10px", fontWeight: 600 }}>{m.month}</td>
                       <td style={{ padding: "6px 10px", textAlign: "right", color: INK_SOFT }}>{yen(m.technicalSales)}</td>
                       <td style={{ padding: "6px 10px", textAlign: "right", color: INK_SOFT }}>{yen(m.productSales)}</td>
@@ -499,7 +529,7 @@ export default function KarteAnalytics() {
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr style={{ borderTop: `2px solid ${INK}`, fontWeight: 700 }}>
+                  <tr style={{ borderTop: `2px solid ${GOLD}`, fontWeight: 700, background: PAPER_2 }}>
                     <td style={{ padding: "8px 10px" }}>合計</td>
                     <td style={{ padding: "8px 10px", textAlign: "right" }}>{yen(kpi.technicalSales)}</td>
                     <td style={{ padding: "8px 10px", textAlign: "right" }}>{yen(kpi.productSales)}</td>
@@ -515,7 +545,7 @@ export default function KarteAnalytics() {
 
           {/* staff table */}
           {staffTable.length > 0 && (
-            <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 4, padding: 18, marginBottom: 22, overflowX: "auto" }}>
+            <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 20, marginBottom: 20, overflowX: "auto" }}>
               <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>スタッフ別（{period === "year" ? `${effectiveYear}年` : effectiveMonth}）</div>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 560 }}>
                 <thead>
@@ -529,8 +559,8 @@ export default function KarteAnalytics() {
                   </tr>
                 </thead>
                 <tbody>
-                  {staffTable.map((s) => (
-                    <tr key={s.staff} style={{ borderBottom: `1px solid ${LINE}` }}>
+                  {staffTable.map((s, i) => (
+                    <tr key={s.staff} style={{ background: i % 2 === 1 ? PAPER_2 : "transparent" }}>
                       <td style={{ padding: "6px 10px", fontWeight: 600 }}>{s.staff}</td>
                       <td style={{ padding: "6px 10px", textAlign: "right", color: INK_SOFT }}>{yen(s.technicalSales)}</td>
                       <td style={{ padding: "6px 10px", textAlign: "right", color: INK_SOFT }}>{yen(s.productSales)}</td>
@@ -546,68 +576,87 @@ export default function KarteAnalytics() {
 
           {/* menu breakdown (常に選択中の年で表示) */}
           {menuMonthlyTable.table.length > 0 && (
-            <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 4, padding: 18, marginBottom: 22, overflowX: "auto" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>メニュー別 月次集計（{effectiveYear}年・技術売上）</div>
-              <div style={{ fontSize: 11.5, color: INK_SOFT, marginBottom: 10 }}>年間タブで年を選ぶと、対象年が切り替わります。</div>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 720 }}>
-                <thead>
-                  <tr style={{ color: INK_SOFT, borderBottom: `1px solid ${LINE}` }}>
-                    <th style={{ textAlign: "left", padding: "6px 10px" }}>メニュー</th>
-                    {menuMonthlyTable.months.map((m) => (
-                      <th key={m} style={{ textAlign: "right", padding: "6px 8px", whiteSpace: "nowrap" }}>
-                        {m.replace(/^\d+年/, "")}
-                      </th>
-                    ))}
-                    <th style={{ textAlign: "right", padding: "6px 10px", fontWeight: 700 }}>合計</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {menuMonthlyTable.table.map((row) => (
-                    <tr key={row.menu} style={{ borderBottom: `1px solid ${LINE}` }}>
-                      <td style={{ padding: "6px 10px", fontWeight: 600 }}>{row.menu}</td>
+            <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 20, marginBottom: 20, overflowX: "auto" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>メニュー別ランキング（{effectiveYear}年・技術売上）</div>
+              <div style={{ fontSize: 11.5, color: INK_SOFT, marginBottom: 14 }}>人気メニューが多い順に並んでいます。年間タブで年を切り替えられます。</div>
+              <RankingList rows={menuMonthlyTable.table} nameKey="menu" />
+              <button
+                onClick={() => setShowMenuDetail((v) => !v)}
+                style={{ marginTop: 14, background: "transparent", border: "none", color: TEAL, fontSize: 12.5, fontWeight: 600, cursor: "pointer", padding: 0 }}
+              >
+                {showMenuDetail ? "月ごとの内訳を閉じる ▲" : "月ごとの内訳を見る ▼"}
+              </button>
+              {showMenuDetail && (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 720, marginTop: 14 }}>
+                  <thead>
+                    <tr style={{ color: INK_SOFT, borderBottom: `1px solid ${LINE}` }}>
+                      <th style={{ textAlign: "left", padding: "8px 10px" }}>メニュー</th>
                       {menuMonthlyTable.months.map((m) => (
-                        <td key={m} style={{ padding: "6px 8px", textAlign: "right", color: INK_SOFT }}>
-                          {row[m] ? yen(row[m]) : "―"}
-                        </td>
+                        <th key={m} style={{ textAlign: "right", padding: "8px 8px", whiteSpace: "nowrap" }}>
+                          {m.replace(/^\d+年/, "")}
+                        </th>
                       ))}
-                      <td style={{ padding: "6px 10px", textAlign: "right", fontWeight: 700 }}>{yen(row.total)}</td>
+                      <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 700 }}>合計</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {menuMonthlyTable.table.map((row, i) => (
+                      <tr key={row.menu} style={{ background: i % 2 === 1 ? PAPER_2 : "transparent" }}>
+                        <td style={{ padding: "8px 10px", fontWeight: 600, borderRadius: "8px 0 0 8px" }}>{row.menu}</td>
+                        {menuMonthlyTable.months.map((m) => (
+                          <td key={m} style={{ padding: "8px 8px", textAlign: "right", color: INK_SOFT }}>
+                            {row[m] ? yen(row[m]) : "―"}
+                          </td>
+                        ))}
+                        <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700, borderRadius: "0 8px 8px 0" }}>{yen(row.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           )}
 
           {/* product breakdown */}
           {productMonthlyTable.table.length > 0 && (
-            <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 4, padding: 18, marginBottom: 22, overflowX: "auto" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>商品別 月次集計（{effectiveYear}年・店販売上）</div>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 720 }}>
-                <thead>
-                  <tr style={{ color: INK_SOFT, borderBottom: `1px solid ${LINE}` }}>
-                    <th style={{ textAlign: "left", padding: "6px 10px" }}>商品名</th>
-                    {productMonthlyTable.months.map((m) => (
-                      <th key={m} style={{ textAlign: "right", padding: "6px 8px", whiteSpace: "nowrap" }}>
-                        {m.replace(/^\d+年/, "")}
-                      </th>
-                    ))}
-                    <th style={{ textAlign: "right", padding: "6px 10px", fontWeight: 700 }}>合計</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {productMonthlyTable.table.map((row) => (
-                    <tr key={row.product} style={{ borderBottom: `1px solid ${LINE}` }}>
-                      <td style={{ padding: "6px 10px", fontWeight: 600 }}>{row.product}</td>
+            <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 20, marginBottom: 20, overflowX: "auto" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>商品別ランキング（{effectiveYear}年・店販売上）</div>
+              <div style={{ fontSize: 11.5, color: INK_SOFT, marginBottom: 14 }}>よく売れている商品が多い順に並んでいます。</div>
+              <RankingList rows={productMonthlyTable.table} nameKey="product" />
+              <button
+                onClick={() => setShowProductDetail((v) => !v)}
+                style={{ marginTop: 14, background: "transparent", border: "none", color: TEAL, fontSize: 12.5, fontWeight: 600, cursor: "pointer", padding: 0 }}
+              >
+                {showProductDetail ? "月ごとの内訳を閉じる ▲" : "月ごとの内訳を見る ▼"}
+              </button>
+              {showProductDetail && (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 720, marginTop: 14 }}>
+                  <thead>
+                    <tr style={{ color: INK_SOFT, borderBottom: `1px solid ${LINE}` }}>
+                      <th style={{ textAlign: "left", padding: "8px 10px" }}>商品名</th>
                       {productMonthlyTable.months.map((m) => (
-                        <td key={m} style={{ padding: "6px 8px", textAlign: "right", color: INK_SOFT }}>
-                          {row[m] ? yen(row[m]) : "―"}
-                        </td>
+                        <th key={m} style={{ textAlign: "right", padding: "8px 8px", whiteSpace: "nowrap" }}>
+                          {m.replace(/^\d+年/, "")}
+                        </th>
                       ))}
-                      <td style={{ padding: "6px 10px", textAlign: "right", fontWeight: 700 }}>{yen(row.total)}</td>
+                      <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 700 }}>合計</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {productMonthlyTable.table.map((row, i) => (
+                      <tr key={row.product} style={{ background: i % 2 === 1 ? PAPER_2 : "transparent" }}>
+                        <td style={{ padding: "8px 10px", fontWeight: 600, borderRadius: "8px 0 0 8px" }}>{row.product}</td>
+                        {productMonthlyTable.months.map((m) => (
+                          <td key={m} style={{ padding: "8px 8px", textAlign: "right", color: INK_SOFT }}>
+                            {row[m] ? yen(row[m]) : "―"}
+                          </td>
+                        ))}
+                        <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700, borderRadius: "0 8px 8px 0" }}>{yen(row.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           )}
         </>
