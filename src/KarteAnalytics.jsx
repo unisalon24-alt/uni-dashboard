@@ -1,16 +1,20 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { RefreshCw, AlertTriangle, JapaneseYen, Users, CalendarCheck2, Wallet, LogIn, LogOut } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
+import { RefreshCw, AlertTriangle, JapaneseYen, Users, CalendarCheck2, Wallet, LogIn, LogOut, Award, Sparkles, Star, CalendarDays, TrendingUp, TrendingDown, Minus, Heart } from "lucide-react";
 import { subscribeKarteAuthState, loginToKarte, logoutFromKarte, fetchAllVisits, KARTE_OWNER_EMAIL } from "./karteFirebase";
 
-// App.jsx と揃えた配色
+// App.jsx と揃えた配色 + 少しやさしさを足した差し色
 const GOLD = "#B8892E";
+const GOLD_LIGHT = "#E6C878";
 const INK = "#241F19";
 const INK_SOFT = "#5B5347";
 const TEAL = "#2F5D57";
 const PAPER_2 = "#F1E8D8";
 const LINE = "#E3D6BC";
 const PLUM = "#6E4A56";
+const ROSE = "#B4657A";
+const SKY = "#5E86A1";
+const CARD_ACCENTS = [GOLD, TEAL, ROSE, SKY, PLUM];
 
 const STORE_ORDER = ["児島店", "酒津店", "会津若松店", "岡山店", "福山店"];
 
@@ -88,16 +92,145 @@ function aggregate(visits) {
   };
 }
 
-function KpiCard({ icon, label, value, sub, accent }) {
+const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
+
+function weekdayOf(dateStr) {
+  const m = String(dateStr || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return d.getDay();
+}
+
+// 曜日ごとの平均売上・来店数を求める（どの曜日が忙しいか、をやわらかく見せる）
+function weekdayBreakdown(visits) {
+  const buckets = WEEKDAY_LABELS.map((label, i) => ({ label, i, totalSales: 0, days: new Set(), count: 0 }));
+  visits.forEach((v) => {
+    const w = weekdayOf(v.date);
+    if (w === null) return;
+    const { total } = splitVisitAmounts(v);
+    buckets[w].totalSales += total;
+    buckets[w].days.add(v.date);
+    buckets[w].count += 1;
+  });
+  return buckets.map((b) => ({ label: b.label, avgSales: b.days.size > 0 ? b.totalSales / b.days.size : 0, count: b.count }));
+}
+
+// 期間内で一番人気だったメニュー・商品・スタッフ・曜日を抜き出す（ハイライト表示用）
+function pickHighlights(visits) {
+  const menuTotals = new Map();
+  const productTotals = new Map();
+  const staffTotals = new Map();
+  visits.forEach((v) => {
+    const { shisen, buppan } = splitVisitAmounts(v);
+    if (v.menu) menuTotals.set(v.menu, (menuTotals.get(v.menu) || 0) + shisen);
+    if (v.staff) staffTotals.set(v.staff, (staffTotals.get(v.staff) || 0) + shisen + buppan);
+    (v.purchasedProducts || []).forEach((p) => {
+      const amount = (Number(p.price) || 0) * (Number(p.qty) || 1);
+      if (p.name) productTotals.set(p.name, (productTotals.get(p.name) || 0) + amount);
+    });
+  });
+  const top = (map) => (map.size === 0 ? null : Array.from(map.entries()).sort((a, b) => b[1] - a[1])[0]);
+  const weekday = weekdayBreakdown(visits).sort((a, b) => b.avgSales - a.avgSales)[0];
+  return {
+    bestMenu: top(menuTotals),
+    bestProduct: top(productTotals),
+    bestStaff: top(staffTotals),
+    busiestWeekday: weekday && weekday.avgSales > 0 ? weekday : null,
+  };
+}
+
+function Delta({ diff, label }) {
+  if (diff === null || diff === undefined || Number.isNaN(diff) || diff === 0) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11, color: INK_SOFT }}>
+        <Minus size={11} /> {label}と同水準
+      </span>
+    );
+  }
+  const up = diff > 0;
+  const Icon = up ? TrendingUp : TrendingDown;
   return (
-    <div style={{ background: PAPER_2, border: `1px solid ${LINE}`, borderRadius: 14, padding: "20px 22px", flex: "1 1 200px", minWidth: 200, position: "relative", overflow: "hidden" }}>
-      <div style={{ position: "absolute", top: 14, left: 14, width: 8, height: 8, borderRadius: 8, background: accent }} />
-      <div style={{ display: "flex", alignItems: "center", gap: 8, color: INK_SOFT, marginBottom: 10, marginLeft: 16 }}>
-        {icon}
-        <span style={{ fontSize: 12, letterSpacing: 1 }}>{label}</span>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11, color: up ? TEAL : ROSE, fontWeight: 700 }}>
+      <Icon size={11} /> {up ? "+" : "-"}¥{Math.round(Math.abs(diff)).toLocaleString("ja-JP")} （{label}比）
+    </span>
+  );
+}
+
+function KpiCard({ icon, label, value, sub, accent, delta }) {
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: `1px solid ${LINE}`,
+        borderRadius: 18,
+        padding: "20px 22px",
+        flex: "1 1 210px",
+        minWidth: 210,
+        boxShadow: "0 2px 10px rgba(36,31,25,0.04)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+        <div
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: "50%",
+            background: `${accent}1A`,
+            color: accent,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          {icon}
+        </div>
+        <span style={{ fontSize: 12.5, color: INK_SOFT, letterSpacing: 0.5 }}>{label}</span>
       </div>
-      <div style={{ fontFamily: "'Shippori Mincho', serif", fontSize: 28, color: INK, lineHeight: 1.1 }}>{value}</div>
-      {sub && <div style={{ fontSize: 11.5, color: INK_SOFT, marginTop: 6 }}>{sub}</div>}
+      <div style={{ fontFamily: "'Shippori Mincho', serif", fontSize: 27, color: INK, lineHeight: 1.1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 11.5, color: INK_SOFT, marginTop: 7 }}>{sub}</div>}
+      {delta && <div style={{ marginTop: 6 }}>{delta}</div>}
+    </div>
+  );
+}
+
+// 「今月のハイライト」など、うれしい発見をひとこと添えて見せる小さなカード
+function HighlightCard({ icon, accent, title, value, note }) {
+  if (!value) return null;
+  return (
+    <div
+      style={{
+        flex: "1 1 220px",
+        minWidth: 220,
+        background: `linear-gradient(135deg, ${accent}14, #fff 70%)`,
+        border: `1px solid ${LINE}`,
+        borderRadius: 18,
+        padding: "16px 18px",
+        display: "flex",
+        gap: 12,
+        alignItems: "flex-start",
+      }}
+    >
+      <div
+        style={{
+          width: 38,
+          height: 38,
+          borderRadius: "50%",
+          background: accent,
+          color: "#fff",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        {icon}
+      </div>
+      <div>
+        <div style={{ fontSize: 11.5, color: INK_SOFT, marginBottom: 3 }}>{title}</div>
+        <div style={{ fontSize: 14.5, fontWeight: 700, color: INK }}>{value}</div>
+        {note && <div style={{ fontSize: 11.5, color: INK_SOFT, marginTop: 3 }}>{note}</div>}
+      </div>
     </div>
   );
 }
@@ -109,10 +242,26 @@ function RankingList({ rows, nameKey, unit = "yen" }) {
     <div>
       {rows.map((r, i) => (
         <div key={r[nameKey]} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: i < rows.length - 1 ? `1px solid ${LINE}` : "none" }}>
-          <div style={{ width: 22, fontSize: 12, color: INK_SOFT, fontFamily: "'Shippori Mincho', serif", flexShrink: 0 }}>{i + 1}</div>
+          <div
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: "50%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 11.5,
+              fontWeight: 700,
+              flexShrink: 0,
+              background: i === 0 ? GOLD_LIGHT : i === 1 ? "#D8D2C4" : i === 2 ? "#E3C7A8" : PAPER_2,
+              color: i < 3 ? INK : INK_SOFT,
+            }}
+          >
+            {i + 1}
+          </div>
           <div style={{ flex: "0 0 180px", fontSize: 13, fontWeight: 600, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r[nameKey]}</div>
           <div style={{ flex: 1, background: PAPER_2, borderRadius: 8, height: 10, overflow: "hidden" }}>
-            <div style={{ width: `${Math.max(4, (r.total / max) * 100)}%`, height: "100%", background: GOLD, borderRadius: 8 }} />
+            <div style={{ width: `${Math.max(4, (r.total / max) * 100)}%`, height: "100%", background: i === 0 ? GOLD : CARD_ACCENTS[i % CARD_ACCENTS.length], borderRadius: 8 }} />
           </div>
           <div style={{ flex: "0 0 90px", textAlign: "right", fontSize: 13, fontVariantNumeric: "tabular-nums", color: INK }}>{unit === "yen" ? yen(r.total) : r.total}</div>
         </div>
@@ -211,6 +360,28 @@ export default function KarteAnalytics() {
   }, [storeFiltered, period, effectiveMonth, effectiveYear]);
 
   const kpi = useMemo(() => aggregate(periodVisits), [periodVisits]);
+
+  // 前月・前年との比較（月次/年間モードのみ）
+  const availableMonthsAsc = useMemo(() => [...availableMonths].sort((a, b) => monthSortKey(a) - monthSortKey(b)), [availableMonths]);
+  const prevKpi = useMemo(() => {
+    if (period === "year") {
+      if (!effectiveYear || !availableYears.includes(effectiveYear - 1)) return null;
+      return aggregate(storeFiltered.filter((v) => yearOf(v.date) === effectiveYear - 1));
+    }
+    if (period === "month") {
+      const idx = availableMonthsAsc.indexOf(effectiveMonth);
+      if (idx <= 0) return null;
+      return aggregate(storeFiltered.filter((v) => monthLabelOf(v.date) === availableMonthsAsc[idx - 1]));
+    }
+    return null;
+  }, [period, effectiveYear, availableYears, effectiveMonth, availableMonthsAsc, storeFiltered]);
+  const deltaLabel = period === "year" ? "前年" : "前月";
+
+  // 今月のハイライト（一番人気のメニュー・商品・スタッフ・曜日）
+  const highlights = useMemo(() => pickHighlights(periodVisits), [periodVisits]);
+
+  // 曜日別の平均売上（忙しい曜日をやわらかく見せる）
+  const weekdayData = useMemo(() => weekdayBreakdown(periodVisits), [periodVisits]);
 
   // 日別テーブル・グラフ用（選択中の月の日ごと集計）
   const dailyRows = useMemo(() => {
@@ -333,6 +504,25 @@ export default function KarteAnalytics() {
 
   return (
     <div>
+      <div
+        style={{
+          background: `linear-gradient(120deg, ${GOLD}14, ${ROSE}10 60%, #fff)`,
+          border: `1px solid ${LINE}`,
+          borderRadius: 18,
+          padding: "18px 22px",
+          marginBottom: 18,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        <Sparkles size={20} style={{ color: GOLD, flexShrink: 0 }} />
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: INK, fontFamily: "'Shippori Mincho', serif" }}>来店データ分析</div>
+          <div style={{ fontSize: 12, color: INK_SOFT, marginTop: 2 }}>カルテの記録から、日々の頑張りが自動でかたちになります。気になる数字をのぞいてみましょう。</div>
+        </div>
+      </div>
+
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 18 }}>
         <div style={{ fontSize: 12, color: INK_SOFT }}>
           {KARTE_OWNER_EMAIL} でログイン中
@@ -441,10 +631,86 @@ export default function KarteAnalytics() {
 
           {/* KPI cards */}
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 22 }}>
-            <KpiCard icon={<JapaneseYen size={16} />} label="合計売上" value={yen(kpi.totalSales)} sub={`技術 ${yen(kpi.technicalSales)}・店販 ${yen(kpi.productSales)}`} accent={INK} />
-            <KpiCard icon={<Wallet size={16} />} label="客単価" value={yen(kpi.avgSpend)} sub={`来店 ${kpi.totalCount}件`} accent={TEAL} />
-            <KpiCard icon={<Users size={16} />} label="新規／既存" value={`${kpi.newCount} ／ ${kpi.repeatCount}`} sub="来店件数ベース" accent={PLUM} />
-            <KpiCard icon={<CalendarCheck2 size={16} />} label="次回予約率" value={pct(kpi.nextBookingRate)} sub={`${kpi.totalCount}件中の割合`} accent={GOLD} />
+            <KpiCard
+              icon={<JapaneseYen size={16} />}
+              label="合計売上"
+              value={yen(kpi.totalSales)}
+              sub={`技術 ${yen(kpi.technicalSales)}・店販 ${yen(kpi.productSales)}`}
+              accent={GOLD}
+              delta={prevKpi && <Delta diff={kpi.totalSales - prevKpi.totalSales} label={deltaLabel} />}
+            />
+            <KpiCard
+              icon={<Wallet size={16} />}
+              label="客単価"
+              value={yen(kpi.avgSpend)}
+              sub={`来店 ${kpi.totalCount}件`}
+              accent={TEAL}
+              delta={prevKpi && <Delta diff={kpi.avgSpend - prevKpi.avgSpend} label={deltaLabel} />}
+            />
+            <KpiCard icon={<Users size={16} />} label="新規／既存" value={`${kpi.newCount} ／ ${kpi.repeatCount}`} sub="来店件数ベース" accent={ROSE} />
+            <KpiCard icon={<CalendarCheck2 size={16} />} label="次回予約率" value={pct(kpi.nextBookingRate)} sub={`${kpi.totalCount}件中の割合`} accent={SKY} />
+          </div>
+
+          {/* highlights */}
+          {(highlights.bestMenu || highlights.bestProduct || highlights.bestStaff || highlights.busiestWeekday) && (
+            <div style={{ marginBottom: 22 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: INK, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+                <Sparkles size={15} style={{ color: GOLD }} /> {period === "year" ? `${effectiveYear}年` : effectiveMonth}のハイライト
+              </div>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <HighlightCard icon={<Award size={17} />} accent={GOLD} title="一番人気のメニュー" value={highlights.bestMenu ? highlights.bestMenu[0] : null} note={highlights.bestMenu ? yen(highlights.bestMenu[1]) : ""} />
+                <HighlightCard icon={<Sparkles size={17} />} accent={ROSE} title="よく売れた商品" value={highlights.bestProduct ? highlights.bestProduct[0] : null} note={highlights.bestProduct ? yen(highlights.bestProduct[1]) : ""} />
+                <HighlightCard icon={<Star size={17} />} accent={SKY} title="売上トップのスタッフ" value={highlights.bestStaff ? highlights.bestStaff[0] : null} note={highlights.bestStaff ? yen(highlights.bestStaff[1]) : ""} />
+                <HighlightCard
+                  icon={<CalendarDays size={17} />}
+                  accent={TEAL}
+                  title="一番忙しい曜日"
+                  value={highlights.busiestWeekday ? `${highlights.busiestWeekday.label}曜日` : null}
+                  note={highlights.busiestWeekday ? `平均 ${yen(highlights.busiestWeekday.avgSales)}／日` : ""}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* new/repeat donut + weekday chart */}
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 22 }}>
+            {kpi.newCount + kpi.repeatCount > 0 && (
+              <div style={{ flex: "1 1 260px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 20 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+                  <Heart size={14} style={{ color: ROSE }} /> 新規・既存のバランス
+                </div>
+                <ResponsiveContainer width="100%" height={190}>
+                  <PieChart>
+                    <Pie data={[{ name: "新規", value: kpi.newCount }, { name: "既存", value: kpi.repeatCount }]} dataKey="value" innerRadius={52} outerRadius={78} paddingAngle={3}>
+                      <Cell fill={SKY} />
+                      <Cell fill={GOLD} />
+                    </Pie>
+                    <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            {weekdayData.some((w) => w.avgSales > 0) && (
+              <div style={{ flex: "1 1 320px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 20 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+                  <CalendarDays size={14} style={{ color: TEAL }} /> 曜日別の平均売上
+                </div>
+                <ResponsiveContainer width="100%" height={190}>
+                  <BarChart data={weekdayData} margin={{ left: -10 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={LINE} vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 12, fill: INK_SOFT }} />
+                    <YAxis tick={{ fontSize: 11, fill: INK_SOFT }} tickFormatter={(v) => `${Math.round(v / 10000)}万`} />
+                    <Tooltip formatter={(v) => yen(v)} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                    <Bar dataKey="avgSales" name="平均売上" radius={[6, 6, 0, 0]}>
+                      {weekdayData.map((w, i) => (
+                        <Cell key={i} fill={CARD_ACCENTS[i % CARD_ACCENTS.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </div>
 
           {/* daily chart + table (日別モード) */}
