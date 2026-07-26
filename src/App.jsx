@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { subscribeStaffRows, saveStaffRows, subscribeAuthState, login, logout, ADMIN_EMAIL } from "./firebaseConfig";
+import KarteAnalytics from "./KarteAnalytics.jsx";
 import {
   BarChart,
   Bar,
@@ -26,6 +27,7 @@ import {
   Download,
   LayoutDashboard,
   Table2,
+  BarChart3,
   TrendingUp,
   TrendingDown,
   Minus,
@@ -198,6 +200,12 @@ function monthSortKey(label) {
   const m = String(label || "").match(/(\d+)\D*年\D*(\d+)\D*月/);
   if (!m) return 0;
   return Number(m[1]) * 12 + Number(m[2]);
+}
+
+// "2026年6月" -> 2026 (年のみを取り出す。年間サマリーでの集計に使う)
+function yearOf(label) {
+  const m = String(label || "").match(/(\d+)\D*年/);
+  return m ? Number(m[1]) : null;
 }
 
 // "6/9" -> { num: 6, den: 9 }; returns null if not a fraction-shaped value
@@ -426,15 +434,15 @@ function RatingBadge({ newBookingRate, repeatBookingRate }) {
   return <span style={{ fontSize: 12, color: INK_SOFT }}>—</span>;
 }
 
-// 前月比の増減を矢印付きで表示する
-function Delta({ diff, unit }) {
+// 前月比・前年比の増減を矢印付きで表示する
+function Delta({ diff, unit, label = "前月比" }) {
   if (diff === null || diff === undefined || Number.isNaN(diff)) return null;
   const roundedForPercent = Math.round(diff * 10) / 10;
   const flat = unit === "pt" ? Math.abs(roundedForPercent) < 0.1 : Math.abs(diff) < 1;
   if (flat) {
     return (
       <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11.5, color: INK_SOFT }}>
-        <Minus size={11} /> 前月と同水準
+        <Minus size={11} /> {label === "前年比" ? "前年と同水準" : "前月と同水準"}
       </span>
     );
   }
@@ -444,7 +452,7 @@ function Delta({ diff, unit }) {
   const text = unit === "pt" ? `${sign}${Math.abs(roundedForPercent).toFixed(1)}pt` : `${sign}¥${Math.round(Math.abs(diff)).toLocaleString("ja-JP")}`;
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11.5, color: up ? TEAL : PLUM, fontWeight: 700 }}>
-      <Icon size={12} /> {text} 前月比
+      <Icon size={12} /> {text} {label}
     </span>
   );
 }
@@ -534,6 +542,8 @@ export default function App() {
   const [view, setView] = useState("dashboard"); // "dashboard" | "data"
   const [selected, setSelected] = useState("all");
   const [selectedMonth, setSelectedMonth] = useState("");
+  const [viewPeriod, setViewPeriod] = useState("month"); // "month" | "year"
+  const [selectedYear, setSelectedYear] = useState("");
   const [staffRows, setStaffRows] = useState(INITIAL_STAFF);
   const [importMsg, setImportMsg] = useState("");
   const [importStore, setImportStore] = useState("");
@@ -620,14 +630,29 @@ export default function App() {
 
   const effectiveMonth = availableMonths.includes(selectedMonth) ? selectedMonth : availableMonths[0] || "";
 
+  const availableYears = useMemo(() => {
+    const seen = new Set();
+    staffRows.forEach((r) => {
+      const y = yearOf(r.month);
+      if (y) seen.add(y);
+    });
+    return Array.from(seen).sort((a, b) => b - a); // newest first
+  }, [staffRows]);
+
+  const effectiveYear = availableYears.includes(Number(selectedYear)) ? Number(selectedYear) : availableYears[0] || null;
+
   const storeFilteredStaff = useMemo(
     () => (selected === "all" ? staffRows : staffRows.filter((r) => r.store === selected)),
     [staffRows, selected]
   );
-  const filteredStaff = useMemo(
-    () => storeFilteredStaff.filter((r) => r.month === effectiveMonth),
-    [storeFilteredStaff, effectiveMonth]
-  );
+
+  // 表示モードに応じて対象期間の行を絞り込む（月次 or 年間）
+  const filteredStaff = useMemo(() => {
+    if (viewPeriod === "year") {
+      return storeFilteredStaff.filter((r) => yearOf(r.month) === effectiveYear);
+    }
+    return storeFilteredStaff.filter((r) => r.month === effectiveMonth);
+  }, [storeFilteredStaff, viewPeriod, effectiveMonth, effectiveYear]);
 
   const kpi = useMemo(() => computeAggregate(filteredStaff), [filteredStaff]);
 
@@ -638,10 +663,15 @@ export default function App() {
     return idx > 0 ? availableMonthsAsc[idx - 1] : null;
   }, [availableMonthsAsc, effectiveMonth]);
 
+  // 前月比（月次モード）／前年比（年間モード）のどちらかを計算する
   const prevKpi = useMemo(() => {
+    if (viewPeriod === "year") {
+      if (!effectiveYear || !availableYears.includes(effectiveYear - 1)) return null;
+      return computeAggregate(storeFilteredStaff.filter((r) => yearOf(r.month) === effectiveYear - 1));
+    }
     if (!prevMonth) return null;
     return computeAggregate(storeFilteredStaff.filter((r) => r.month === prevMonth));
-  }, [storeFilteredStaff, prevMonth]);
+  }, [viewPeriod, effectiveYear, availableYears, prevMonth, storeFilteredStaff]);
 
   const monthlyTrend = useMemo(() => {
     const byMonth = new Map();
@@ -655,14 +685,56 @@ export default function App() {
       .sort((a, b) => monthSortKey(a.month) - monthSortKey(b.month));
   }, [storeFilteredStaff]);
 
-  const storeCompareData = useMemo(
-    () => aggregateSalesByStore(staffRows.filter((r) => r.month === effectiveMonth)),
-    [staffRows, effectiveMonth]
-  );
+  // 年間モードのときは、選択中の年の月だけに絞った推移グラフ用データ
+  const yearMonthlyTrend = useMemo(() => {
+    if (!effectiveYear) return [];
+    return monthlyTrend.filter((m) => yearOf(m.month) === effectiveYear);
+  }, [monthlyTrend, effectiveYear]);
+
+  const storeCompareData = useMemo(() => {
+    const rows =
+      viewPeriod === "year" ? staffRows.filter((r) => yearOf(r.month) === effectiveYear) : staffRows.filter((r) => r.month === effectiveMonth);
+    return aggregateSalesByStore(rows);
+  }, [staffRows, viewPeriod, effectiveMonth, effectiveYear]);
 
   const rankedStaff = useMemo(() => {
-    return [...filteredStaff]
-      .filter((r) => !DASHBOARD_HIDDEN_NAMES.includes(r.name))
+    const visibleRows = filteredStaff.filter((r) => !DASHBOARD_HIDDEN_NAMES.includes(r.name));
+
+    // 年間モードでは、同じスタッフ(店舗+名前)の月別行をまとめて年間合計にする
+    const baseRows =
+      viewPeriod === "year"
+        ? Array.from(
+            visibleRows
+              .reduce((map, r) => {
+                const key = `${r.store}||${r.name}`;
+                const existing = map.get(key);
+                if (existing) {
+                  existing.newC += Number(r.newC || 0);
+                  existing.newBookings += Number(r.newBookings || 0);
+                  existing.repeatC += Number(r.repeatC || 0);
+                  existing.repeatBookings += Number(r.repeatBookings || 0);
+                  existing.sales += Number(r.sales || 0);
+                  existing.productSales += Number(r.productSales || 0);
+                } else {
+                  map.set(key, {
+                    id: key,
+                    store: r.store,
+                    name: r.name,
+                    newC: Number(r.newC || 0),
+                    newBookings: Number(r.newBookings || 0),
+                    repeatC: Number(r.repeatC || 0),
+                    repeatBookings: Number(r.repeatBookings || 0),
+                    sales: Number(r.sales || 0),
+                    productSales: Number(r.productSales || 0),
+                  });
+                }
+                return map;
+              }, new Map())
+              .values()
+          )
+        : visibleRows;
+
+    return baseRows
       .map((r) => {
         const totalSales = Number(r.sales || 0) + Number(r.productSales || 0);
         return {
@@ -676,7 +748,7 @@ export default function App() {
         };
       })
       .sort((a, b) => b.repeatBookingRate - a.repeatBookingRate);
-  }, [filteredStaff]);
+  }, [filteredStaff, viewPeriod]);
 
   // ---- data editing helpers ----
   const updateStaff = (id, field, value) => {
@@ -880,6 +952,23 @@ export default function App() {
           >
             <Table2 size={14} /> データ入力
           </div>
+          <div
+            className="sd-tab"
+            onClick={() => setView("karte")}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 3,
+              fontSize: 13,
+              fontWeight: view === "karte" ? 700 : 500,
+              background: view === "karte" ? INK : "transparent",
+              color: view === "karte" ? PAPER : INK,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <BarChart3 size={14} /> 来店データ分析
+          </div>
           </div>
         </div>
       </div>
@@ -924,7 +1013,37 @@ export default function App() {
                 </div>
               ))}
             </div>
-            {availableMonths.length > 0 && (
+            <div className="no-print" style={{ display: "inline-flex", gap: 6, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 4, padding: 4 }}>
+              <div
+                className="sd-tab"
+                onClick={() => setViewPeriod("month")}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 3,
+                  fontSize: 13,
+                  fontWeight: viewPeriod === "month" ? 700 : 500,
+                  background: viewPeriod === "month" ? INK : "transparent",
+                  color: viewPeriod === "month" ? PAPER : INK,
+                }}
+              >
+                月次
+              </div>
+              <div
+                className="sd-tab"
+                onClick={() => setViewPeriod("year")}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 3,
+                  fontSize: 13,
+                  fontWeight: viewPeriod === "year" ? 700 : 500,
+                  background: viewPeriod === "year" ? INK : "transparent",
+                  color: viewPeriod === "year" ? PAPER : INK,
+                }}
+              >
+                年間
+              </div>
+            </div>
+            {viewPeriod === "month" && availableMonths.length > 0 && (
               <select
                 value={effectiveMonth}
                 onChange={(e) => setSelectedMonth(e.target.value)}
@@ -941,6 +1060,27 @@ export default function App() {
                 {availableMonths.map((m) => (
                   <option key={m} value={m}>
                     {m}
+                  </option>
+                ))}
+              </select>
+            )}
+            {viewPeriod === "year" && availableYears.length > 0 && (
+              <select
+                value={effectiveYear || ""}
+                onChange={(e) => setSelectedYear(e.target.value)}
+                style={{
+                  background: "#fff",
+                  border: `1px solid ${LINE}`,
+                  borderRadius: 4,
+                  padding: "9px 12px",
+                  fontSize: 13.5,
+                  fontFamily: "'Noto Sans JP', sans-serif",
+                  color: INK,
+                }}
+              >
+                {availableYears.map((y) => (
+                  <option key={y} value={y}>
+                    {y}年
                   </option>
                 ))}
               </select>
@@ -972,7 +1112,7 @@ export default function App() {
               label="次回予約率（新規客）"
               value={pct(kpi.newBookingRate)}
               sub={`新規 ${kpi.totalNew}人 中 ${kpi.totalNewBookings}人が次回予約`}
-              delta={prevKpi && <Delta diff={(kpi.newBookingRate - prevKpi.newBookingRate) * 100} unit="pt" />}
+              delta={prevKpi && <Delta diff={(kpi.newBookingRate - prevKpi.newBookingRate) * 100} unit="pt" label={viewPeriod === "year" ? "前年比" : "前月比"} />}
               accent={TEAL}
             />
             <KpiCard
@@ -980,7 +1120,7 @@ export default function App() {
               label="次回予約率（顧客）"
               value={pct(kpi.repeatBookingRate)}
               sub={`顧客 ${kpi.totalRepeat}人 中 ${kpi.totalRepeatBookings}人が次回予約`}
-              delta={prevKpi && <Delta diff={(kpi.repeatBookingRate - prevKpi.repeatBookingRate) * 100} unit="pt" />}
+              delta={prevKpi && <Delta diff={(kpi.repeatBookingRate - prevKpi.repeatBookingRate) * 100} unit="pt" label={viewPeriod === "year" ? "前年比" : "前月比"} />}
               accent={GOLD}
             />
             <KpiCard
@@ -988,7 +1128,7 @@ export default function App() {
               label="合計売上"
               value={yen(kpi.totalSales)}
               sub={`技術売上 ${yen(kpi.totalTechnicalSales)} ・ 店販売上 ${yen(kpi.totalProductSales)}`}
-              delta={prevKpi && <Delta diff={kpi.totalSales - prevKpi.totalSales} unit="yen" />}
+              delta={prevKpi && <Delta diff={kpi.totalSales - prevKpi.totalSales} unit="yen" label={viewPeriod === "year" ? "前年比" : "前月比"} />}
               accent={INK}
             />
             <KpiCard
@@ -996,7 +1136,7 @@ export default function App() {
               label="技術売上"
               value={yen(kpi.totalTechnicalSales)}
               sub={selected === "all" ? "全店舗合計" : "当店合計"}
-              delta={prevKpi && <Delta diff={kpi.totalTechnicalSales - prevKpi.totalTechnicalSales} unit="yen" />}
+              delta={prevKpi && <Delta diff={kpi.totalTechnicalSales - prevKpi.totalTechnicalSales} unit="yen" label={viewPeriod === "year" ? "前年比" : "前月比"} />}
               accent={PLUM}
             />
             <KpiCard
@@ -1004,7 +1144,7 @@ export default function App() {
               label="店販売上"
               value={yen(kpi.totalProductSales)}
               sub={selected === "all" ? "全店舗合計" : "当店合計"}
-              delta={prevKpi && <Delta diff={kpi.totalProductSales - prevKpi.totalProductSales} unit="yen" />}
+              delta={prevKpi && <Delta diff={kpi.totalProductSales - prevKpi.totalProductSales} unit="yen" label={viewPeriod === "year" ? "前年比" : "前月比"} />}
               accent={GOLD}
             />
             <KpiCard
@@ -1012,13 +1152,19 @@ export default function App() {
               label="客単価"
               value={yen(kpi.avgSpend)}
               sub={`来店 ${kpi.totalCustomers}人あたりの売上`}
-              delta={prevKpi && <Delta diff={kpi.avgSpend - prevKpi.avgSpend} unit="yen" />}
+              delta={prevKpi && <Delta diff={kpi.avgSpend - prevKpi.avgSpend} unit="yen" label={viewPeriod === "year" ? "前年比" : "前月比"} />}
               accent={TEAL}
             />
           </div>
-          {prevMonth && (
+          {viewPeriod === "month" && prevMonth && (
             <div style={{ fontSize: 11.5, color: INK_SOFT, marginTop: -14, marginBottom: 22 }}>
               前月比は {prevMonth} との比較です
+            </div>
+          )}
+          {viewPeriod === "year" && effectiveYear && (
+            <div style={{ fontSize: 11.5, color: INK_SOFT, marginTop: -14, marginBottom: 22 }}>
+              {effectiveYear}年（{yearMonthlyTrend.length}ヶ月分のデータ）の集計です
+              {prevKpi ? `。前年比は${effectiveYear - 1}年との比較です` : "。前年のデータがまだ無いため、前年比は表示されません"}
             </div>
           )}
 
@@ -1045,39 +1191,98 @@ export default function App() {
           </div>
 
           {/* monthly trend */}
-          {monthlyTrend.length > 1 && (
-            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 22 }}>
-              <div style={{ flex: "1 1 320px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 4, padding: 18 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
-                  <TrendingUp size={15} /> 月次推移（次回予約率）
-                </div>
-                <ResponsiveContainer width="100%" height={220}>
-                  <LineChart data={monthlyTrend} margin={{ left: -10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={LINE} vertical={false} />
-                    <XAxis dataKey="month" tick={{ fontSize: 11, fill: INK_SOFT }} />
-                    <YAxis tick={{ fontSize: 11, fill: INK_SOFT }} tickFormatter={(v) => `${Math.round(v * 100)}%`} domain={[0, 1]} />
-                    <Tooltip formatter={(v) => pct(v)} contentStyle={{ fontSize: 12, fontFamily: "'Noto Sans JP', sans-serif" }} />
-                    <Legend wrapperStyle={{ fontSize: 12 }} />
-                    <Line type="monotone" dataKey="repeatBookingRate" name="次回予約率（顧客）" stroke={GOLD} strokeWidth={2} dot={{ r: 3 }} />
-                    <Line type="monotone" dataKey="newBookingRate" name="次回予約率（新規）" stroke={TEAL} strokeWidth={2} dot={{ r: 3 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+          {(() => {
+            const trendData = viewPeriod === "year" ? yearMonthlyTrend : monthlyTrend;
+            const trendLabel = viewPeriod === "year" ? `${effectiveYear}年の月次推移` : "月次推移";
+            return (
+              trendData.length > 1 && (
+                <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 22 }}>
+                  <div style={{ flex: "1 1 320px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 4, padding: 18 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+                      <TrendingUp size={15} /> {trendLabel}（次回予約率）
+                    </div>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <LineChart data={trendData} margin={{ left: -10 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={LINE} vertical={false} />
+                        <XAxis dataKey="month" tick={{ fontSize: 11, fill: INK_SOFT }} />
+                        <YAxis tick={{ fontSize: 11, fill: INK_SOFT }} tickFormatter={(v) => `${Math.round(v * 100)}%`} domain={[0, 1]} />
+                        <Tooltip formatter={(v) => pct(v)} contentStyle={{ fontSize: 12, fontFamily: "'Noto Sans JP', sans-serif" }} />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        <Line type="monotone" dataKey="repeatBookingRate" name="次回予約率（顧客）" stroke={GOLD} strokeWidth={2} dot={{ r: 3 }} />
+                        <Line type="monotone" dataKey="newBookingRate" name="次回予約率（新規）" stroke={TEAL} strokeWidth={2} dot={{ r: 3 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
 
-              <div style={{ flex: "1 1 260px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 4, padding: 18 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
-                  <JapaneseYen size={15} /> 月次推移（売上）
+                  <div style={{ flex: "1 1 260px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 4, padding: 18 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+                      <JapaneseYen size={15} /> {trendLabel}（売上）
+                    </div>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={trendData} margin={{ left: -10 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={LINE} vertical={false} />
+                        <XAxis dataKey="month" tick={{ fontSize: 11, fill: INK_SOFT }} />
+                        <YAxis tick={{ fontSize: 11, fill: INK_SOFT }} tickFormatter={(v) => `${Math.round(v / 10000)}万`} />
+                        <Tooltip formatter={(v) => yen(v)} contentStyle={{ fontSize: 12, fontFamily: "'Noto Sans JP', sans-serif" }} />
+                        <Bar dataKey="totalSales" name="売上" fill={INK} radius={[3, 3, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                 </div>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={monthlyTrend} margin={{ left: -10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={LINE} vertical={false} />
-                    <XAxis dataKey="month" tick={{ fontSize: 11, fill: INK_SOFT }} />
-                    <YAxis tick={{ fontSize: 11, fill: INK_SOFT }} tickFormatter={(v) => `${Math.round(v / 10000)}万`} />
-                    <Tooltip formatter={(v) => yen(v)} contentStyle={{ fontSize: 12, fontFamily: "'Noto Sans JP', sans-serif" }} />
-                    <Bar dataKey="totalSales" name="売上" fill={INK} radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+              )
+            );
+          })()}
+
+          {/* annual breakdown table (サロンボード風の月別内訳＋合計) */}
+          {viewPeriod === "year" && yearMonthlyTrend.length > 0 && (
+            <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 4, padding: "18px 4px", marginBottom: 22, overflowX: "auto" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, padding: "0 18px", display: "flex", alignItems: "center", gap: 6 }}>
+                <Table2 size={15} /> {effectiveYear}年 月別内訳（{selected === "all" ? "全店舗" : selected}）
               </div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 720 }}>
+                <thead>
+                  <tr style={{ color: INK_SOFT, borderBottom: `1px solid ${LINE}` }}>
+                    <th style={{ textAlign: "left", padding: "8px 18px", fontWeight: 500 }}>月</th>
+                    <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 500 }}>技術売上</th>
+                    <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 500 }}>店販売上</th>
+                    <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 500 }}>合計売上</th>
+                    <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 500 }}>客単価</th>
+                    <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 500 }}>新規</th>
+                    <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 500 }}>既存</th>
+                    <th style={{ textAlign: "right", padding: "8px 18px", fontWeight: 500 }}>次回予約率（新規／顧客）</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {yearMonthlyTrend.map((m) => (
+                    <tr key={m.month} className="sd-row" style={{ borderBottom: `1px solid ${LINE}` }}>
+                      <td style={{ padding: "8px 18px", fontWeight: 600 }}>{m.month}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "right", color: INK_SOFT, fontVariantNumeric: "tabular-nums" }}>{yen(m.totalTechnicalSales)}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "right", color: INK_SOFT, fontVariantNumeric: "tabular-nums" }}>{yen(m.totalProductSales)}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{yen(m.totalSales)}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "right", color: INK_SOFT, fontVariantNumeric: "tabular-nums" }}>{yen(m.avgSpend)}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{m.totalNew}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{m.totalRepeat}</td>
+                      <td style={{ padding: "8px 18px", textAlign: "right", color: INK_SOFT, fontVariantNumeric: "tabular-nums" }}>
+                        {pct(m.newBookingRate)} ／ {pct(m.repeatBookingRate)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{ borderTop: `2px solid ${INK}`, fontWeight: 700 }}>
+                    <td style={{ padding: "10px 18px", fontFamily: "'Shippori Mincho', serif" }}>合計</td>
+                    <td style={{ padding: "10px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{yen(kpi.totalTechnicalSales)}</td>
+                    <td style={{ padding: "10px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{yen(kpi.totalProductSales)}</td>
+                    <td style={{ padding: "10px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{yen(kpi.totalSales)}</td>
+                    <td style={{ padding: "10px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{yen(kpi.avgSpend)}</td>
+                    <td style={{ padding: "10px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{kpi.totalNew}</td>
+                    <td style={{ padding: "10px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{kpi.totalRepeat}</td>
+                    <td style={{ padding: "10px 18px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                      {pct(kpi.newBookingRate)} ／ {pct(kpi.repeatBookingRate)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
             </div>
           )}
 
@@ -1143,7 +1348,7 @@ export default function App() {
             </div>
           </div>
         </>
-      ) : (
+      ) : view === "data" ? (
         <>
           {/* data entry view */}
           {!isAdmin && (
@@ -1272,6 +1477,8 @@ export default function App() {
             </table>
           </div>
         </>
+      ) : (
+        <KarteAnalytics />
       )}
     </div>
   );
