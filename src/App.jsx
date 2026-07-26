@@ -2,6 +2,7 @@ import React, { useMemo, useState, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { subscribeStaffRows, saveStaffRows, subscribeAuthState, login, logout, ADMIN_EMAIL } from "./firebaseConfig";
 import KarteAnalytics from "./KarteAnalytics.jsx";
+import { fetchKarteStaffRows } from "./karteToStaffRows";
 import {
   BarChart,
   Bar,
@@ -545,6 +546,37 @@ export default function App() {
   const [viewPeriod, setViewPeriod] = useState("month"); // "month" | "year"
   const [selectedYear, setSelectedYear] = useState("");
   const [staffRows, setStaffRows] = useState(INITIAL_STAFF);
+
+  // 2026年8月以降は、手入力ではなくカルテアプリのデータを自動で反映する
+  const KARTE_CUTOVER_MONTH = "2026年8月";
+  const [karteRows, setKarteRows] = useState([]);
+  const [karteLoadState, setKarteLoadState] = useState("loading"); // loading | loaded | error
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchKarteStaffRows("2026-08-01")
+      .then((rows) => {
+        if (!cancelled) {
+          setKarteRows(rows);
+          setKarteLoadState("loaded");
+        }
+      })
+      .catch((err) => {
+        console.error("[karte merge fetch error]", err);
+        if (!cancelled) setKarteLoadState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ダッシュボードで実際に使うデータ：2026年7月までは手入力（データ入力タブ）、
+  // 2026年8月以降はカルテアプリの記録を自動集計したものに置き換える
+  const effectiveStaffRows = useMemo(() => {
+    const cutoverKey = monthSortKey(KARTE_CUTOVER_MONTH);
+    const manual = staffRows.filter((r) => monthSortKey(r.month) < cutoverKey);
+    return [...manual, ...karteRows];
+  }, [staffRows, karteRows]);
   const [importMsg, setImportMsg] = useState("");
   const [importStore, setImportStore] = useState("");
 
@@ -609,7 +641,7 @@ export default function App() {
 
   const storeNames = useMemo(() => {
     const seen = [];
-    staffRows.forEach((r) => {
+    effectiveStaffRows.forEach((r) => {
       if (r.store && !seen.includes(r.store)) seen.push(r.store);
     });
     return seen.sort((a, b) => {
@@ -620,30 +652,30 @@ export default function App() {
       if (ib === -1) return -1;
       return ia - ib;
     });
-  }, [staffRows]);
+  }, [effectiveStaffRows]);
 
   const availableMonths = useMemo(() => {
     const seen = new Set();
-    staffRows.forEach((r) => r.month && seen.add(r.month));
+    effectiveStaffRows.forEach((r) => r.month && seen.add(r.month));
     return Array.from(seen).sort((a, b) => monthSortKey(b) - monthSortKey(a)); // newest first
-  }, [staffRows]);
+  }, [effectiveStaffRows]);
 
   const effectiveMonth = availableMonths.includes(selectedMonth) ? selectedMonth : availableMonths[0] || "";
 
   const availableYears = useMemo(() => {
     const seen = new Set();
-    staffRows.forEach((r) => {
+    effectiveStaffRows.forEach((r) => {
       const y = yearOf(r.month);
       if (y) seen.add(y);
     });
     return Array.from(seen).sort((a, b) => b - a); // newest first
-  }, [staffRows]);
+  }, [effectiveStaffRows]);
 
   const effectiveYear = availableYears.includes(Number(selectedYear)) ? Number(selectedYear) : availableYears[0] || null;
 
   const storeFilteredStaff = useMemo(
-    () => (selected === "all" ? staffRows : staffRows.filter((r) => r.store === selected)),
-    [staffRows, selected]
+    () => (selected === "all" ? effectiveStaffRows : effectiveStaffRows.filter((r) => r.store === selected)),
+    [effectiveStaffRows, selected]
   );
 
   // 表示モードに応じて対象期間の行を絞り込む（月次 or 年間）
@@ -693,9 +725,11 @@ export default function App() {
 
   const storeCompareData = useMemo(() => {
     const rows =
-      viewPeriod === "year" ? staffRows.filter((r) => yearOf(r.month) === effectiveYear) : staffRows.filter((r) => r.month === effectiveMonth);
+      viewPeriod === "year"
+        ? effectiveStaffRows.filter((r) => yearOf(r.month) === effectiveYear)
+        : effectiveStaffRows.filter((r) => r.month === effectiveMonth);
     return aggregateSalesByStore(rows);
-  }, [staffRows, viewPeriod, effectiveMonth, effectiveYear]);
+  }, [effectiveStaffRows, viewPeriod, effectiveMonth, effectiveYear]);
 
   const rankedStaff = useMemo(() => {
     const visibleRows = filteredStaff.filter((r) => !DASHBOARD_HIDDEN_NAMES.includes(r.name));
@@ -1165,6 +1199,16 @@ export default function App() {
             <div style={{ fontSize: 11.5, color: INK_SOFT, marginTop: -14, marginBottom: 22 }}>
               {effectiveYear}年（{yearMonthlyTrend.length}ヶ月分のデータ）の集計です
               {prevKpi ? `。前年比は${effectiveYear - 1}年との比較です` : "。前年のデータがまだ無いため、前年比は表示されません"}
+            </div>
+          )}
+          {karteLoadState === "error" && (
+            <div
+              style={{
+                fontSize: 12, color: PLUM, background: "rgba(184,137,46,0.08)", border: `1px solid ${LINE}`,
+                borderRadius: 4, padding: "10px 14px", marginBottom: 22, display: "flex", alignItems: "center", gap: 6,
+              }}
+            >
+              <AlertTriangle size={13} /> {KARTE_CUTOVER_MONTH}以降のカルテ連携データが読み込めませんでした（表示されているのは{KARTE_CUTOVER_MONTH}より前の分のみです）。カルテ側のFirestoreルールをご確認ください。
             </div>
           )}
 
