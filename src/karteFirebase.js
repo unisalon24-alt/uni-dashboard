@@ -19,7 +19,7 @@ export const karteDb = getFirestore(karteApp);
 export const karteAuth = getAuth(karteApp);
 
 // 全店舗を横断して閲覧できる、ダッシュボード専用のログインアカウント
-export const KARTE_OWNER_EMAIL = "owner-dashboard@uni-counseling-internal.com";
+export const KARTE_OWNER_EMAIL = "uni.salon24@gmail.com";
 
 const ALL_KARTE_STORES = ["児島店", "酒津店", "岡山店", "福山店", "会津若松店"];
 
