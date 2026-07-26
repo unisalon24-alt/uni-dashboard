@@ -36,13 +36,24 @@ export async function logoutFromKarte() {
 }
 
 /**
- * 全店舗分の来店記録(visits)を取得する。
+ * 来店記録(visits)を取得する。
  * Firestoreのwhere('in', ...)は最大10件までしか指定できないが、店舗は5つなので問題ない。
+ *
+ * sinceDate（例："2025-01-01"）を指定すると、その日以降の分だけを読み込む。
+ * データが増えても読み込み量（＝Firestoreの読み取り回数・費用）が際限なく増えないようにするため、
+ * 通常はこちらを使い、必要なときだけ全期間を読み込む（sinceDateを省略）ようにする。
  */
-export async function fetchAllVisits() {
-  const q = query(collection(karteDb, "visits"), where("store", "in", ALL_KARTE_STORES));
+export async function fetchVisits(sinceDate) {
+  const clauses = [where("store", "in", ALL_KARTE_STORES)];
+  if (sinceDate) clauses.push(where("date", ">=", sinceDate));
+  const q = query(collection(karteDb, "visits"), ...clauses);
   const snap = await getDocs(q);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+/** 全期間分の来店記録を取得する（過去のインポート分も含む・費用が気になる場合は多用しない） */
+export async function fetchAllVisits() {
+  return fetchVisits(undefined);
 }
 
 /** 全店舗分の顧客情報(customers)を取得する（新規/リピート判定などに使う） */

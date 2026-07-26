@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
 import { RefreshCw, AlertTriangle, JapaneseYen, Users, CalendarCheck2, Wallet, LogIn, LogOut, Award, Sparkles, Star, CalendarDays, TrendingUp, TrendingDown, Minus, Heart } from "lucide-react";
-import { subscribeKarteAuthState, loginToKarte, logoutFromKarte, fetchAllVisits, KARTE_OWNER_EMAIL } from "./karteFirebase";
+import { subscribeKarteAuthState, loginToKarte, logoutFromKarte, fetchVisits, KARTE_OWNER_EMAIL } from "./karteFirebase";
 
 // App.jsx と揃えた配色 + 少しやさしさを足した差し色
 const GOLD = "#B8892E";
@@ -48,15 +48,26 @@ function splitVisitAmounts(v) {
   return { shisen, buppan, total };
 }
 
+// カルテアプリ側の表記ゆれ（例：「難波純一郎」→正しくは「難波順一朗」）を吸収する。
+// 同じ人が別人として集計されてしまうのを防ぐための名寄せ。
+const STAFF_NAME_ALIASES = {
+  難波純一郎: "難波順一朗",
+};
+
+function normalizeStaffName(name) {
+  return STAFF_NAME_ALIASES[name] || name;
+}
+
 // 顧客ごとの最も古い来店日を求め、その日の来店だけを「新規」とみなす
 function attachIsNew(visits) {
+  const normalized = visits.map((v) => ({ ...v, staff: normalizeStaffName(v.staff) }));
   const earliest = new Map();
-  visits.forEach((v) => {
+  normalized.forEach((v) => {
     if (!v.customerId || !v.date) return;
     const cur = earliest.get(v.customerId);
     if (!cur || v.date < cur) earliest.set(v.customerId, v.date);
   });
-  return visits.map((v) => ({
+  return normalized.map((v) => ({
     ...v,
     __isNew: v.customerId && v.date ? v.date === earliest.get(v.customerId) : null,
   }));
@@ -308,14 +319,25 @@ export default function KarteAnalytics() {
     }
   };
 
-  const doFetch = async () => {
+  const [loadedFullHistory, setLoadedFullHistory] = useState(false);
+
+  // 既定では「読み込みすぎて費用がかからないように」直近2年分（今年＋前年）だけを取得する。
+  // 前年の1月1日を求める。
+  const defaultSinceDate = useMemo(() => {
+    const y = new Date().getFullYear() - 1;
+    return `${y}-01-01`;
+  }, []);
+
+  const doFetch = async (full = false) => {
     setFetching(true);
     setFetchError("");
     try {
-      const rows = await fetchAllVisits();
+      const rows = await fetchVisits(full ? undefined : defaultSinceDate);
       setVisits(attachIsNew(rows));
       setLastFetchedAt(new Date());
+      setLoadedFullHistory(full);
     } catch (err) {
+      console.error("[karte fetch error]", err);
       setFetchError("来店データの取得に失敗しました。Firestoreのルール設定をご確認ください。");
     } finally {
       setFetching(false);
@@ -323,7 +345,7 @@ export default function KarteAnalytics() {
   };
 
   useEffect(() => {
-    if (karteUser) doFetch();
+    if (karteUser) doFetch(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [karteUser]);
 
@@ -523,14 +545,14 @@ export default function KarteAnalytics() {
         </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 18 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 8 }}>
         <div style={{ fontSize: 12, color: INK_SOFT }}>
           {KARTE_OWNER_EMAIL} でログイン中
           {lastFetchedAt && ` ・ 最終取得：${lastFetchedAt.toLocaleString("ja-JP")}`}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button
-            onClick={doFetch}
+            onClick={() => doFetch(loadedFullHistory)}
             disabled={fetching}
             style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff", border: `1px solid ${LINE}`, color: INK, borderRadius: 999, padding: "7px 16px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}
           >
@@ -543,6 +565,21 @@ export default function KarteAnalytics() {
             <LogOut size={13} /> ログアウト
           </button>
         </div>
+      </div>
+
+      <div style={{ fontSize: 11.5, color: INK_SOFT, marginBottom: 18 }}>
+        {loadedFullHistory
+          ? "全期間のデータを読み込んでいます。"
+          : `読み込みすぎて費用がかからないよう、${defaultSinceDate.slice(0, 4)}年以降（直近2年分）だけを読み込んでいます。`}
+        {!loadedFullHistory && (
+          <button
+            onClick={() => doFetch(true)}
+            disabled={fetching}
+            style={{ marginLeft: 8, background: "transparent", border: "none", color: TEAL, fontSize: 11.5, fontWeight: 600, cursor: "pointer", padding: 0, textDecoration: "underline" }}
+          >
+            もっと前のデータも読み込む
+          </button>
+        )}
       </div>
 
       {fetchError && (
